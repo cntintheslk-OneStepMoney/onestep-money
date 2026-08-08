@@ -184,9 +184,17 @@ export class FinanceDataStore {
       restoredIds.set(previousId, stored.document.id);
     }
     backup.state.documents = backup.documents.map((entry) => entry.metadata);
-    for (const collectionName of ['transactions', 'payslips', 'taxDocuments']) {
+    for (const collectionName of ['transactions', 'payslips', 'taxDocuments', 'creditReports']) {
       for (const record of backup.state[collectionName] || []) {
         if (restoredIds.has(record.sourceDocumentId)) record.sourceDocumentId = restoredIds.get(record.sourceDocumentId);
+        for (const account of record.accounts || []) {
+          if (restoredIds.has(account.sourceDocumentId)) account.sourceDocumentId = restoredIds.get(account.sourceDocumentId);
+        }
+      }
+    }
+    for (const collectionName of ['debts', 'overdrafts']) {
+      for (const record of backup.state[collectionName] || []) {
+        if (restoredIds.has(record.sourceStatementDocumentId)) record.sourceStatementDocumentId = restoredIds.get(record.sourceStatementDocumentId);
       }
     }
     for (const batch of backup.state.importBatches || []) {
@@ -226,13 +234,14 @@ export class FinanceDataStore {
 function migrateState(input) {
   const state = input && typeof input === 'object' ? input : {};
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     meta: { createdAt: state.meta?.createdAt || new Date().toISOString(), updatedAt: state.meta?.updatedAt || new Date().toISOString() },
     profile: state.profile || { name: '', locale: 'en-GB', currency: 'GBP', dependableIncome: 0, paydayDay: 30 },
     accounts: Array.isArray(state.accounts) ? state.accounts : [],
     transactions: Array.isArray(state.transactions) ? state.transactions : [],
     payslips: Array.isArray(state.payslips) ? state.payslips : [],
     taxDocuments: Array.isArray(state.taxDocuments) ? state.taxDocuments : [],
+    creditReports: Array.isArray(state.creditReports) ? state.creditReports : [],
     debts: Array.isArray(state.debts) ? state.debts : [],
     overdrafts: Array.isArray(state.overdrafts) ? state.overdrafts : [],
     budgets: Array.isArray(state.budgets) ? state.budgets : [],
@@ -265,7 +274,7 @@ async function atomicWrite(destination, contents) {
 
 function mimeFromName(fileName) {
   const extension = path.extname(fileName).toLowerCase();
-  return ({ '.pdf': 'application/pdf', '.csv': 'text/csv', '.qif': 'application/qif', '.ofx': 'application/x-ofx', '.txt': 'text/plain', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' })[extension] || 'application/octet-stream';
+  return ({ '.pdf': 'application/pdf', '.csv': 'text/csv', '.tsv': 'text/tab-separated-values', '.qif': 'application/qif', '.ofx': 'application/x-ofx', '.qfx': 'application/x-ofx', '.txt': 'text/plain', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' })[extension] || 'application/octet-stream';
 }
 
 function requirePassphrase(passphrase) {

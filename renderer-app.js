@@ -1,7 +1,8 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate
+  creditReportDebtStatus, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
+  hasCompletedCheckIn, planCreditReportAccounts, syncStatementAccount
 } from './finance-core.js';
 
 let state;
@@ -54,6 +55,7 @@ function bindEvents() {
   byId('quickCheckInButton').addEventListener('click', logCheckIn);
   byId('importStatementButton').addEventListener('click', () => importDocuments('statement'));
   byId('importPayslipButton').addEventListener('click', () => importDocuments('payslip'));
+  byId('importCreditReportButton').addEventListener('click', () => importDocuments('credit-report'));
   byId('exportCsvButton').addEventListener('click', async () => {
     const saved = await window.financeAPI.exportCsv(exportTransactionsCsv(state.transactions));
     if (saved) showToast('Payments exported safely.');
@@ -100,6 +102,9 @@ function render() {
   byId('nextActionTitle').textContent = pendingAction.title;
   byId('nextActionDetail').textContent = pendingAction.detail || '';
   byId('nextActionTime').textContent = pendingAction.timeframe || '10 min';
+  byId('completeActionButton').hidden = Boolean(pendingAction.passive);
+  byId('snoozeActionButton').hidden = Boolean(pendingAction.passive);
+  renderDailyCompletion();
   byId('marginValue').textContent = formatCurrency(summary.plannedMargin);
   byId('cashFlowValue').textContent = formatCurrency(summary.netCashFlow);
   byId('todayDebtValue').textContent = formatCurrency(summary.debts);
@@ -113,6 +118,7 @@ function render() {
   renderTransactions();
   renderPay();
   renderDebts();
+  renderCreditReports();
   renderOverdrafts();
   renderBudget();
   renderDocuments();
@@ -135,9 +141,22 @@ function renderMomentum() {
   const current = Number(state.settings.emergencyBufferBalance || 0);
   const target = Math.max(1, Number(state.settings.emergencyBufferTarget || 500));
   const percent = Math.min(100, Math.round((current / target) * 100));
+  const completedToday = hasCompletedCheckIn(state.checkIns);
   byId('bufferProgress').style.width = `${percent}%`;
   byId('momentumTitle').textContent = current ? `${percent}% of your starter buffer` : 'Showing up counts';
   byId('momentumText').textContent = current ? `${formatCurrency(current)} saved toward ${formatCurrency(target)}. Keep the target small while payments are being stabilised.` : 'Your first win is a completed check-in. The buffer can grow after essential payments are secure.';
+  byId('quickCheckInButton').disabled = completedToday;
+  byId('quickCheckInButton').textContent = completedToday ? 'Check-in complete today' : 'Complete five-minute check-in';
+  byId('checkInStatus').textContent = completedToday
+    ? 'Recorded for today. There is nothing else you need to tick off.'
+    : 'Use this when you reviewed your money but did not finish the action above.';
+}
+
+function renderDailyCompletion() {
+  const completedToday = hasCompletedCheckIn(state.checkIns);
+  document.querySelector('.focus-panel').hidden = completedToday;
+  document.querySelector('.permission-slip').hidden = completedToday;
+  byId('dailyCompleteState').hidden = !completedToday;
 }
 
 function renderTransactions() {
@@ -227,6 +246,20 @@ function renderDebts() {
   for (const item of state.debts) container.append(entityCard('debt', item, [stat('Balance', formatCurrency(item.currentBalance)), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`), stat('Payment', item.contractualPayment ? formatCurrency(item.contractualPayment) : 'Unknown', true)]));
 }
 
+function renderCreditReports() {
+  const container = byId('creditReportCards'); clear(container);
+  const reports = [...(state.creditReports || [])].sort((left, right) => String(right.reportDate || '').localeCompare(String(left.reportDate || '')));
+  if (!reports.length) {
+    container.append(element('p', 'muted', 'No credit reports imported yet.'));
+    return;
+  }
+  for (const report of reports) {
+    const score = report.score == null ? 'Score not detected' : `Score ${report.score}${report.scoreMaximum ? ` / ${report.scoreMaximum}` : ''}`;
+    const detail = `${report.reportDate ? formatDate(report.reportDate) : 'Date not detected'} · ${score} · ${(report.accounts || []).length} reported account${(report.accounts || []).length === 1 ? '' : 's'}`;
+    container.append(entityCard('credit report', { ...report, name: report.provider, description: detail }, [], false));
+  }
+}
+
 function renderOverdrafts() {
   const total = state.overdrafts.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0);
   byId('overdraftTotalValue').textContent = formatCurrency(total);
@@ -270,7 +303,7 @@ function renderDocuments() {
   const container = byId('documentCards'); clear(container);
   const documents = [...state.documents].sort((left, right) => right.importedAt.localeCompare(left.importedAt));
   if (!documents.length) {
-    const empty = element('article', 'panel'); append(empty, element('h2', '', 'No secure documents yet'), element('p', 'muted', 'Import a bank statement or payslip. The encrypted original will appear here automatically.')); container.append(empty); return;
+    const empty = element('article', 'panel'); append(empty, element('h2', '', 'No secure documents yet'), element('p', 'muted', 'Import a bank statement, payslip or credit report. The encrypted original will appear here automatically.')); container.append(empty); return;
   }
   for (const documentItem of documents) {
     const card = entityCard('document', documentItem, [stat('Type', titleCase(documentItem.kind)), stat('Imported', formatDate(documentItem.importedAt)), stat('Status', titleCase(documentItem.parseStatus), true)], false);
@@ -338,7 +371,14 @@ function showNextImport() {
   const preview = currentImport.preview;
   byId('importTitle').textContent = currentImport.document.originalName;
   const summary = byId('importSummary'); clear(summary);
-  if (preview.kind === 'payslip') {
+  if (preview.kind === 'credit-report') {
+    const report = preview.records[0];
+    currentImport.creditPlan = report ? creditReportAdditionPlan(report) : [];
+    const newBalances = currentImport.creditPlan.filter((item) => item.action === 'add-debt' || item.action === 'add-overdraft').length;
+    const updates = currentImport.creditPlan.filter((item) => item.action === 'existing').length;
+    const score = preview.summary.score == null ? 'Not detected' : `${preview.summary.score}${preview.summary.scoreMaximum ? ` / ${preview.summary.scoreMaximum}` : ''}`;
+    append(summary, summaryTile('Provider', preview.summary.provider || 'Unknown'), summaryTile('Report date', preview.summary.reportDate ? formatDate(preview.summary.reportDate) : 'Not detected'), summaryTile('Score', score), summaryTile('Debt sync', `${newBalances} new · ${updates} update${updates === 1 ? '' : 's'}`));
+  } else if (preview.kind === 'payslip') {
     append(summary, summaryTile('Period', monthLabel(preview.summary.period)), summaryTile('Gross', formatCurrency(preview.summary.gross)), summaryTile('Deductions', formatCurrency(preview.summary.deductions)), summaryTile('Net', formatCurrency(preview.summary.net)));
   } else {
     append(summary, summaryTile('Records', preview.records.length), summaryTile('Money in', formatCurrency(preview.summary.incoming)), summaryTile('Money out', formatCurrency(preview.summary.outgoing)), summaryTile('Reconciled', preview.reconciled ? 'Yes' : 'Needs review'));
@@ -348,14 +388,30 @@ function showNextImport() {
   warning.hidden = !messages.length; warning.textContent = messages.join('\n');
   renderImportPreview(preview);
   byId('confirmImportButton').disabled = !preview.records.length;
+  byId('confirmImportButton').textContent = preview.kind === 'credit-report' ? 'Save report and sync debts' : 'Import reviewed records';
   byId('importDialog').showModal();
 }
 
 function renderImportPreview(preview) {
   const head = byId('importPreviewHead'); const body = byId('importPreviewRows'); clear(head); clear(body);
   const headerRow = document.createElement('tr');
-  const headers = preview.kind === 'payslip' ? ['Period', 'Gross', 'Deductions', 'Net'] : ['Date', 'Description', 'Incoming', 'Outgoing', 'Balance'];
+  const headers = preview.kind === 'credit-report'
+    ? ['Lender', 'Type', 'Balance', 'Limit', 'Action']
+    : preview.kind === 'payslip' ? ['Period', 'Gross', 'Deductions', 'Net'] : ['Date', 'Description', 'Incoming', 'Outgoing', 'Balance'];
   headers.forEach((label) => headerRow.append(element('th', '', label))); head.append(headerRow);
+  if (preview.kind === 'credit-report') {
+    const plan = currentImport?.creditPlan || [];
+    if (!plan.length) {
+      const row = document.createElement('tr'); const empty = cell('No structured account rows detected. The PDF can still be stored securely.'); empty.colSpan = 5; row.append(empty); body.append(row);
+      return;
+    }
+    for (const item of plan) {
+      const row = document.createElement('tr');
+      append(row, cell(item.account.lender), cell(item.account.accountType || 'Unknown'), amountCell(item.account.currentBalance), amountCell(item.account.creditLimit), cell(creditPlanLabel(item)));
+      body.append(row);
+    }
+    return;
+  }
   for (const record of preview.records.slice(0, 100)) {
     const row = document.createElement('tr');
     if (preview.kind === 'payslip') append(row, cell(monthLabel(record.period)), amountCell(record.grossPay), amountCell(record.totalDeductions), amountCell(record.netPay));
@@ -368,7 +424,14 @@ async function confirmCurrentImport(event) {
   event.preventDefault();
   if (!currentImport) return;
   const preview = currentImport.preview;
-  if (preview.kind === 'payslip') {
+  let completionMessage = 'Reviewed records imported.';
+  if (preview.kind === 'credit-report') {
+    const report = preview.records[0];
+    state.creditReports ||= [];
+    if (report && !state.creditReports.some((item) => item.id === report.id || item.sourceDocumentId === report.sourceDocumentId)) state.creditReports.push(report);
+    const added = applyCreditReportPlan(report, currentImport.creditPlan || []);
+    completionMessage = `Credit report saved. ${added.debts} debt${added.debts === 1 ? '' : 's'} and ${added.overdrafts} overdraft${added.overdrafts === 1 ? '' : 's'} added; ${added.updated} tracked balance${added.updated === 1 ? '' : 's'} updated.`;
+  } else if (preview.kind === 'payslip') {
     for (const record of preview.records) if (!state.payslips.some((item) => item.id === record.id)) state.payslips.push(record);
   } else {
     const duplicates = findDuplicateCandidates(state.transactions, preview.records);
@@ -376,40 +439,171 @@ async function confirmCurrentImport(event) {
     const possibleIds = new Set(duplicates.possible.map((item) => item.incoming.id));
     state.transactions.push(...preview.records.filter((item) => !exactIds.has(item.id)).map((item) => ({ ...item, duplicateStatus: possibleIds.has(item.id) ? 'possible' : 'none' })));
     const account = state.accounts.find((item) => item.id === preview.accountHint);
-    if (account && preview.reconciled && Number.isFinite(preview.summary.closingBalance)) {
-      account.currentBalance = preview.summary.closingBalance;
-      account.statementDate = preview.records.map((item) => item.date).filter(Boolean).sort().at(-1) || account.statementDate;
+    if (account) {
+      const overdraftSync = syncStatementAccount(state, account, preview, currentImport.document.id);
+      completionMessage = overdraftSync === 'overdraft-created'
+        ? 'Statement imported. Account balance updated and its overdraft added.'
+        : overdraftSync === 'overdraft-updated' ? 'Statement imported. Account and overdraft balances updated.'
+          : overdraftSync === 'account-updated' ? 'Statement imported and account balance updated.' : completionMessage;
     }
     if (exactIds.size) showToast(`${exactIds.size} exact duplicate${exactIds.size === 1 ? '' : 's'} skipped.`);
   }
-  state.importBatches.push({ id: createId('import'), documentId: currentImport.document.id, kind: preview.kind, importedAt: new Date().toISOString(), recordCount: preview.records.length, reconciled: preview.reconciled });
+  const recordCount = preview.kind === 'credit-report' ? (preview.records[0]?.accounts || []).length : preview.records.length;
+  state.importBatches.push({ id: createId('import'), documentId: currentImport.document.id, kind: preview.kind, importedAt: new Date().toISOString(), recordCount, reconciled: preview.reconciled });
   await saveState();
   byId('importDialog').close('confirmed');
   currentImport = null;
   render();
-  showToast('Reviewed records imported.');
+  showToast(completionMessage);
   showNextImport();
 }
 
+function creditReportAdditionPlan(report) {
+  return planCreditReportAccounts(state.debts, state.overdrafts, report?.accounts || []);
+}
+
+function applyCreditReportPlan(report, plan) {
+  const added = { debts: 0, overdrafts: 0, updated: 0 };
+  for (const item of plan) {
+    const account = item.account;
+    if (item.action === 'existing') {
+      const collection = item.kind === 'overdraft' ? state.overdrafts : state.debts;
+      const existing = collection.find((entry) => entry.id === item.existingId);
+      if (existing) {
+        applyReportedAccountFields(existing, account, report);
+        added.updated += 1;
+      }
+      continue;
+    }
+    if (!['add-debt', 'add-overdraft'].includes(item.action)) continue;
+    const common = {
+      name: account.lender || 'Reported account',
+      currentBalance: Number(account.currentBalance || 0),
+      apr: account.apr ?? null,
+      contractualPayment: account.contractualPayment ?? null,
+      creditLimit: account.creditLimit ?? null,
+      originalBalance: account.originalBalance ?? null,
+      openedDate: account.openedDate || '',
+      defaultDate: account.defaultDate || '',
+      lastReportedAt: account.updatedDate || report.reportDate || '',
+      reportedStatus: account.status || '',
+      status: creditReportDebtStatus(account.status),
+      includeInPlan: true,
+      arrangementConfirmed: false,
+      interestFrozen: false,
+      planPriority: 999,
+      accountReference: account.accountReference || '',
+      sourceCreditReportId: report.id,
+      sourceCreditAccountId: account.id,
+      description: `Imported from ${report.provider} credit report${report.reportDate ? ` dated ${formatDate(report.reportDate)}` : ''}.`,
+      notes: 'Confirm the APR, minimum payment and current balance against the lender before planning overpayments.',
+      updatedAt: new Date().toISOString()
+    };
+    if (item.action === 'add-overdraft') {
+      state.overdrafts.push({ id: createId('overdraft'), ...common, type: 'overdraft', accountId: '', limit: account.creditLimit ?? null });
+      added.overdrafts += 1;
+    } else {
+      state.debts.push({ id: createId('debt'), ...common, type: account.accountType || 'Credit report account' });
+      added.debts += 1;
+    }
+  }
+  return added;
+}
+
+function applyReportedAccountFields(existing, account, report) {
+  if (account.currentBalance !== null && account.currentBalance !== undefined && Number.isFinite(Number(account.currentBalance))) existing.currentBalance = Number(account.currentBalance);
+  if (account.apr !== null && account.apr !== undefined) existing.apr = account.apr;
+  if (account.contractualPayment !== null && account.contractualPayment !== undefined) existing.contractualPayment = account.contractualPayment;
+  if (account.creditLimit !== null && account.creditLimit !== undefined) {
+    existing.creditLimit = account.creditLimit;
+    if ('limit' in existing) existing.limit = account.creditLimit;
+  }
+  if (account.originalBalance !== null && account.originalBalance !== undefined) existing.originalBalance = account.originalBalance;
+  if (account.openedDate) existing.openedDate = account.openedDate;
+  if (account.defaultDate) existing.defaultDate = account.defaultDate;
+  if (account.accountReference) existing.accountReference = account.accountReference;
+  if (account.status) {
+    existing.reportedStatus = account.status;
+    existing.status = creditReportDebtStatus(account.status);
+  }
+  existing.lastReportedAt = account.updatedDate || report.reportDate || existing.lastReportedAt || '';
+  existing.sourceCreditReportId = report.id;
+  existing.sourceCreditAccountId = account.id;
+  existing.updatedAt = new Date().toISOString();
+}
+
+function creditPlanLabel(item) {
+  if (item.action === 'add-debt') return 'Add as new debt';
+  if (item.action === 'add-overdraft') return 'Add as overdraft';
+  if (item.action === 'existing') return 'Update tracked balance';
+  return 'No balance — do not add';
+}
+
 async function completeNextAction() {
+  if (hasCompletedCheckIn(state.checkIns)) return;
+  const blocker = actionCompletionBlocker(pendingAction);
+  if (blocker) {
+    byId('nextActionDetail').textContent = blocker;
+    const panel = document.querySelector('.focus-panel');
+    panel.classList.remove('is-blocked');
+    void panel.offsetWidth;
+    panel.classList.add('is-blocked');
+    window.setTimeout(() => panel.classList.remove('is-blocked'), 460);
+    showToast('This action is still open. Complete it, or use the five-minute check-in below.');
+    return;
+  }
   const task = state.tasks.find((item) => item.id === pendingAction.id);
   if (task) task.completedAt = new Date().toISOString();
-  state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), note: pendingAction.title });
-  await saveAndRender();
-  showToast('Done. You can close the app now.');
+  state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: pendingAction.id, note: pendingAction.title });
+  await saveState();
+  await animateFocusPanel('is-completing', 360);
+  render();
+  showToast('Today is complete. You can close the app now.');
+}
+
+function actionCompletionBlocker(action) {
+  if (action.id === 'generated-first-account' && !state.accounts.length) return 'This step is still open: add an account in Settings first. If you only reviewed your money today, use the five-minute check-in below instead.';
+  if (action.id === 'generated-first-import' && !state.transactions.length) return 'This step is still open: import and confirm at least one payment first. If you only reviewed your money today, use the five-minute check-in below instead.';
+  return '';
 }
 
 async function snoozeNextAction() {
   const task = state.tasks.find((item) => item.id === pendingAction.id);
-  if (task) { const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); task.snoozedUntil = tomorrow.toISOString().slice(0, 10); }
-  await saveAndRender();
-  showToast('Snoozed for one day.');
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const snoozedUntil = localDateKey(tomorrow);
+  if (task) task.snoozedUntil = snoozedUntil;
+  else {
+    state.settings.snoozedActions ||= {};
+    state.settings.snoozedActions[pendingAction.id] = snoozedUntil;
+  }
+  await saveState();
+  await animateFocusPanel('is-switching', 180);
+  render();
+  const panel = document.querySelector('.focus-panel');
+  panel.classList.add('is-arriving');
+  window.setTimeout(() => panel.classList.remove('is-arriving'), 320);
+  showToast('Snoozed until tomorrow. Here is your next available step.');
 }
 
 async function logCheckIn() {
-  state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), note: 'Five-minute check-in' });
-  await saveAndRender();
-  showToast('Check-in logged. That is enough for today.');
+  if (hasCompletedCheckIn(state.checkIns)) {
+    showToast('Today’s check-in is already complete.');
+    return;
+  }
+  state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'five-minute', note: 'Five-minute check-in' });
+  await saveState();
+  await animateFocusPanel('is-completing', 360);
+  render();
+  showToast('Five-minute check-in complete. That is enough for today.');
+}
+
+async function animateFocusPanel(className, duration) {
+  const panel = document.querySelector('.focus-panel');
+  if (!panel || panel.hidden) return;
+  panel.classList.add(className);
+  await new Promise((resolve) => window.setTimeout(resolve, duration));
+  panel.classList.remove(className);
 }
 
 function handleEditClick(event) {
@@ -447,10 +641,12 @@ function editorDefinitions(type) {
   ];
   if (type === 'payslip') return [['notes', 'Notes', 'textarea', '', 'wide-field']];
   if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']]], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
-  const base = [['name','Name','text'], ['type','Type','text'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual payment','number'], ['status','Status','select',[['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['includeInPlan','Include in payoff plan','checkbox'], ['arrangementConfirmed','Payment arrangement confirmed','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
+  const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual payment','number'], ['status','Status','select',[['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['includeInPlan','Include in payoff plan','checkbox'], ['arrangementConfirmed','Payment arrangement confirmed','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
   if (type === 'overdraft') {
     base.splice(1, 0, ['accountId', 'Linked account', 'select', [['','Not linked'], ...state.accounts.map((account) => [account.id, account.name])]]);
-    base.splice(4, 0, ['limit','Overdraft limit','number']);
+    base.splice(8, 0, ['limit','Overdraft limit','number']);
+  } else {
+    base.splice(7, 0, ['originalBalance','Original balance / amount','number'], ['creditLimit','Credit limit','number']);
   }
   return base;
 }
@@ -512,7 +708,7 @@ async function handleDocumentClick(event) {
   const open = event.target.closest('[data-document-open]');
   if (open) { try { await window.financeAPI.openDocument(open.dataset.documentOpen); } catch (error) { showToast(error.message); } return; }
   const remove = event.target.closest('[data-document-delete]');
-  if (remove && window.confirm('Permanently delete this encrypted document? Its imported payment records will remain.')) {
+  if (remove && window.confirm('Permanently delete this encrypted document? Records already imported from it will remain.')) {
     state = await window.financeAPI.deleteDocument(remove.dataset.documentDelete); render(); showToast('Encrypted document deleted.');
   }
 }
@@ -691,6 +887,7 @@ function element(tag, className = '', text = '') { const output = document.creat
 function append(parent, ...children) { parent.append(...children); return parent; }
 function clear(node) { while (node.firstChild) node.firstChild.remove(); }
 function monthLabel(month) { if (!/^\d{4}-\d{2}$/.test(month || '')) return month || 'Unknown'; return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`)); }
+function localDateKey(value) { const date = value instanceof Date ? value : new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function titleCase(value) { return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()); }
 function statusLabel(value) { return value ? `Status: ${titleCase(value)}` : 'No notes yet'; }
 function showToast(message) { const toast = byId('toast'); toast.textContent = message; toast.hidden = false; window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 4200); }
