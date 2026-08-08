@@ -69,6 +69,19 @@ export function calculateBudgetRows(state, month = state.settings?.selectedMonth
   return calculateBudgetAnalysis(state, month).rows;
 }
 
+export function removeBudgetCategory(state, budgetId) {
+  const next = structuredClone(state);
+  const budgetExists = (next.budgets || []).some((budget) => budget.id === budgetId);
+  if (!budgetExists) throw new Error('This budget category is no longer available.');
+  next.budgets = next.budgets.filter((budget) => budget.id !== budgetId);
+  for (const transaction of next.transactions || []) {
+    if (transaction.budgetCategoryId !== budgetId) continue;
+    transaction.budgetCategoryId = '';
+    transaction.categorySource = 'manual';
+  }
+  return next;
+}
+
 export function calculateBudgetAnalysis(state, month = state.settings?.selectedMonth) {
   const budgets = state.budgets || [];
   const transactions = periodTransactions(state.transactions, month);

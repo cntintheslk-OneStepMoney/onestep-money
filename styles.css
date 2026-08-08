@@ -573,8 +573,13 @@ tr:last-child td { border-bottom: 0; }
 .budget-summary strong { color: var(--navy); font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .budget-list { display: grid; gap: 0.65rem; margin-top: 0.9rem; }
 .budget-item { display: grid; gap: 0.4rem; }
-.budget-line { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; font-size: 0.83rem; }
-.budget-line button { padding: 0; color: var(--ink); background: none; border: 0; font-weight: 760; text-align: left; }
+.budget-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.8rem; font-size: 0.83rem; }
+.budget-line-summary { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.budget-category-name { overflow-wrap: anywhere; color: var(--ink); font-weight: 760; }
+.budget-item-actions { display: flex; align-items: center; gap: 0.4rem; }
+.budget-item-actions button { min-height: 36px; padding: 0.45rem 0.66rem; border-radius: 9px; font-size: 0.74rem; }
+.budget-remove-button { color: var(--red); background: var(--red-soft); border: 1px solid transparent; font-weight: 770; }
+.budget-remove-button:hover { background: #f9dce1; }
 .budget-status { color: var(--muted); font-size: 0.76rem; }
 .budget-bar { height: 7px; overflow: hidden; background: #e8eef3; border-radius: 999px; }
 .budget-bar span { max-width: 100%; height: 100%; display: block; background: linear-gradient(90deg, #0c8878, #2acbb0); border-radius: inherit; transition: width 650ms cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -822,6 +827,10 @@ tr:last-child td { border-bottom: 0; }
   .entity-card, .payslip-summary { grid-template-columns: 1fr; }
   .entity-controls { justify-content: stretch; }
   .entity-controls .edit-button { width: 100%; }
+  .budget-line, .budget-line-summary { align-items: stretch; grid-template-columns: 1fr; }
+  .budget-line-summary { flex-direction: column; gap: 0.25rem; }
+  .budget-item-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .budget-item-actions button { width: 100%; }
   .permission-slip { align-items: flex-start; text-align: left; }
   .recovery-destructive, .recovery-backup { align-items: stretch; flex-direction: column; }
   .recovery-portable { grid-template-columns: 1fr; }
