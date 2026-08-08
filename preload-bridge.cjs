@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
+  getAppVersion: () => ipcRenderer.invoke('app:version'),
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
   retryRecovery: () => ipcRenderer.invoke('recovery:retry'),
