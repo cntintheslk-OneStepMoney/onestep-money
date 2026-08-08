@@ -4,10 +4,12 @@ release/
 tmp/
 user-data/
 automatic-backups/
+recovery-copies/
 finance-state.json
 vault-key.json
 document-vault/
 *.vault
+*.restore
 *.osmb
 *.lfb
 *.hfb

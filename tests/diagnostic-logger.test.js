@@ -47,6 +47,22 @@ test('detailed diagnostics are not written when secure storage is unavailable', 
   await assert.rejects(fs.access(path.join(directory, 'diagnostics', 'diagnostics-0.enc')));
 });
 
+test('recovery diagnostics retain only safe reason codes', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory);
+
+  await logger.record('STATE_RECOVERY_REQUIRED', {
+    reasonCode: 'decryption_failure',
+    error: new Error('balance £9876.54 key=fictional-secret decrypted={"name":"Private User"}')
+  });
+  const report = await logger.buildReport();
+
+  assert.match(report.text, /DAT-103 STATE_RECOVERY_REQUIRED/);
+  assert.match(report.text, /reason_code=decryption_failure/);
+  assert.doesNotMatch(report.text, /9876|fictional-secret|Private User|decrypted/);
+});
+
 test('diagnostics expire after fourteen days and can be deleted locally', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
