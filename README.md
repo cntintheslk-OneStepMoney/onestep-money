@@ -79,19 +79,6 @@ The NSIS installer is written to `dist/`. Application updates do not delete the 
 
 Create a password-protected backup in the earlier app, install OneStep Money, then restore that backup from **Settings**. OneStep Money accepts both current `.osmb` backups and the earlier `.hfb` backup format. The migration happens on the user's device; no private data is placed in this repository or in a release package.
 
-## Release updates
-
-The repository workflow publishes a Windows installer and update metadata when a version tag is pushed.
-
-1. Update the version in `package.json` and `package-lock.json`.
-2. Commit and push the change.
-3. Tag the commit, for example `v2.1.1`.
-4. Push the tag.
-
-GitHub Actions runs the tests and privacy check before publishing the release. Installed copies then download the update and offer a clear **Restart and update** button.
-
-Unsigned community builds may trigger Microsoft SmartScreen. Code signing is recommended before distributing the installer widely.
-
 ## Document naming
 
 Imported documents use:
