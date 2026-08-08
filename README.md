@@ -21,7 +21,7 @@ New installations start completely blank. This repository contains no personal a
 - Detects exact and possible duplicate transactions conservatively.
 - Excludes confirmed transfers between owned accounts from income and spending.
 - Uses deterministic local financial checks, with an optional small Ollama model for private natural-language guidance.
-- Builds password-protected portable backups.
+- Builds password-protected, manifest-verified portable backups containing the matching financial state and document set.
 - Keeps privacy-safe local diagnostics that can be reviewed, exported or deleted from Settings.
 - Supports installed Windows updates through GitHub Releases.
 
@@ -58,6 +58,15 @@ Unrecognised layouts are rejected visibly. Invalid dates and amounts are never s
 - Diagnostic events stay local, exclude financial and document content, use operating-system encryption for detailed entries, expire after 14 days and are never uploaded automatically.
 - The optional guide connects only to Ollama on `127.0.0.1` and receives a compact financial summary, never raw document contents or transaction descriptions.
 - Repository checks reject seeded financial data, common secret formats and financial-document file types.
+
+## Backup and restore safety
+
+- Backup snapshots hold the persistence lock while the financial state and encrypted document vault are copied and verified.
+- Published backup manifests contain only format information, identifiers, timestamps, file sizes and SHA-256 checksums; financial values and document contents remain inside the encrypted payload.
+- Restores validate the complete backup before changing live data, create a verified pre-restore safety snapshot, and install state and documents through a durable restore journal.
+- If installation or post-restore verification fails, OneStep automatically restores and reopens the complete pre-restore dataset.
+- An interrupted restore is resolved before normal startup. OneStep either finalises the verified restored set, rolls back to the verified original set or enters write-blocked recovery mode.
+- Portable backup sources are treated as read-only. Staging data remains encrypted on disk, and legacy state-only backups are labelled as incomplete rather than presented as full restores.
 
 ## Run from source
 
