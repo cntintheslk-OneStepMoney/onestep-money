@@ -14,8 +14,12 @@ let editorContext = null;
 let diagnosticPreviewToken = null;
 let recoveryResult = null;
 let freshStartToken = null;
+let restoreToken = null;
+let restoreInProgress = false;
+let restoreCanCancel = true;
 let normalEventsBound = false;
 let recoveryEventsBound = false;
+let restoreEventsBound = false;
 
 const viewMeta = {
   today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
@@ -77,8 +81,10 @@ function showRecoveryMode(result) {
 }
 
 function bindRecoveryEvents() {
+  bindRestoreEvents();
   byId('retryRecoveryButton').addEventListener('click', retryRecovery);
   byId('recoveryBackupList').addEventListener('click', restoreRecoveryBackup);
+  byId('chooseRecoveryBackupButton').addEventListener('click', selectRecoveryPortableBackup);
   byId('requestFreshStartButton').addEventListener('click', requestFreshStart);
   byId('freshStartAcknowledgement').addEventListener('change', () => {
     byId('confirmFreshStartButton').disabled = !byId('freshStartAcknowledgement').checked;
@@ -97,6 +103,10 @@ function renderRecoveryMode() {
     invalid_content: 'The existing state is incomplete or contains invalid data.',
     schema_validation_failure: 'The existing state did not pass OneStep’s data-integrity checks.',
     migration_failure: 'OneStep could not safely update the stored data to the current schema.',
+    restore_interrupted: 'OneStep found a restore that did not finish. Saving remains paused while the complete datasets are preserved.',
+    restore_rollback_failed: 'OneStep could not safely complete or reverse the last restore. The selected backup and safety copy have been preserved.',
+    restore_journal_invalid: 'OneStep found restore-tracking data it could not safely interpret. Saving remains paused.',
+    restore_interrupted_unresolved: 'OneStep could not determine which complete dataset should be active after an interrupted restore.',
     unknown_storage_failure: 'An unexpected storage error prevented OneStep from safely opening the existing data.'
   };
   byId('recoveryReason').textContent = reasonMessages[recovery.reasonCode] || reasonMessages.unknown_storage_failure;
@@ -112,7 +122,8 @@ function renderRecoveryMode() {
     const card = element('article', `recovery-backup ${backup.valid ? '' : 'invalid'}`.trim());
     const copy = element('div', 'recovery-backup-copy');
     const title = backup.valid && backup.id === newestValid?.id ? 'Newest valid backup' : backup.valid ? 'Valid backup' : 'Backup could not be validated';
-    append(copy, element('strong', '', title), element('span', '', `${formatRecoveryDate(backup.createdAt)}${backup.schemaVersion ? ` · Schema ${backup.schemaVersion}` : ''}`));
+    const details = [formatRecoveryDate(backup.createdAt), backup.schemaVersion ? `Schema ${backup.schemaVersion}` : null, Number.isInteger(backup.documentCount) ? `${backup.documentCount} document${backup.documentCount === 1 ? '' : 's'}` : null, backup.migrationRequired ? 'Migration required' : null].filter(Boolean).join(' · ');
+    append(copy, element('strong', '', title), element('span', '', details));
     card.append(copy);
     if (backup.valid) {
       const button = element('button', 'primary-button', 'Restore this backup');
@@ -133,6 +144,8 @@ function renderRecoveryMode() {
   const statusMessages = {
     restore_failed: 'That backup could not be restored. Recovery mode is still active and the original state remains preserved.',
     backup_not_found: 'That backup is no longer available. Recovery mode is still active.',
+    restore_rollback_failed: 'OneStep could not safely complete or reverse the restore. Saving remains paused and all recovery material has been preserved.',
+    restore_interrupted: 'The restore was interrupted. OneStep has paused saving until recovery is resolved.',
     fresh_start_failed: 'A new state could not be created safely. Recovery mode is still active.',
     confirmation_invalid: 'The start-again confirmation expired. Review the warning again if you still want to continue.'
   };
@@ -155,13 +168,40 @@ async function retryRecovery() {
 async function restoreRecoveryBackup(event) {
   const button = event.target.closest('[data-recovery-backup]');
   if (!button) return;
-  if (!window.confirm('Restore this validated backup as the active financial state?')) return;
   button.disabled = true;
-  byId('recoveryStatus').textContent = 'Restoring and reopening the selected backup…';
+  byId('recoveryStatus').textContent = 'Preparing restore details…';
   try {
-    handleRecoveryResponse(await window.financeAPI.restoreRecoveryBackup(button.dataset.recoveryBackup));
-  } catch {
-    byId('recoveryStatus').textContent = 'The backup could not be restored. Recovery mode remains active.';
+    const result = await window.financeAPI.restoreRecoveryBackup(button.dataset.recoveryBackup);
+    if (!result.token) { handleRecoveryResponse(result); return; }
+    restoreToken = result.token;
+    restoreInProgress = false;
+    restoreCanCancel = true;
+    renderRestoreConfirmation(result.backup);
+    byId('recoveryStatus').textContent = 'Backup checked. Review the restore details.';
+    byId('restoreDialog').showModal();
+  } catch (error) {
+    byId('recoveryStatus').textContent = error.message || 'The backup could not be prepared. Recovery mode remains active.';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function selectRecoveryPortableBackup() {
+  const button = byId('chooseRecoveryBackupButton');
+  button.disabled = true;
+  byId('recoveryStatus').textContent = 'Select an encrypted backup to check…';
+  try {
+    const result = await window.financeAPI.selectRecoveryPortableBackup(byId('recoveryBackupPassphrase').value);
+    if (result.canceled) { byId('recoveryStatus').textContent = 'Backup selection cancelled.'; return; }
+    if (!result.token) throw new Error('The backup could not be selected for recovery.');
+    restoreToken = result.token;
+    restoreInProgress = false;
+    restoreCanCancel = true;
+    renderRestoreConfirmation(result.backup);
+    byId('recoveryStatus').textContent = 'Backup checked. Review the restore details.';
+    byId('restoreDialog').showModal();
+  } catch (error) {
+    byId('recoveryStatus').textContent = error.message;
   } finally {
     button.disabled = false;
   }
@@ -217,6 +257,7 @@ function formatRecoveryDate(value) {
 }
 
 function bindEvents() {
+  bindRestoreEvents();
   document.querySelectorAll('.nav-button').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.view)));
   byId('monthSelect').addEventListener('change', async () => { state.settings.selectedMonth = byId('monthSelect').value; await saveAndRender(); });
   byId('completeActionButton').addEventListener('click', completeNextAction);
@@ -253,6 +294,19 @@ function bindEvents() {
   byId('exportDiagnosticsButton').addEventListener('click', exportDiagnostics);
   byId('deleteDiagnosticsButton').addEventListener('click', deleteDiagnostics);
   window.financeAPI.onUpdateStatus(handleUpdateStatus);
+}
+
+function bindRestoreEvents() {
+  if (restoreEventsBound) return;
+  restoreEventsBound = true;
+  byId('confirmRestoreButton').addEventListener('click', confirmRestoreBackup);
+  byId('cancelRestoreButton').addEventListener('click', cancelRestoreBackup);
+  byId('closeRestoreButton').addEventListener('click', cancelRestoreBackup);
+  byId('restoreDialog').addEventListener('cancel', (event) => {
+    event.preventDefault();
+    if (!restoreInProgress || restoreCanCancel) cancelRestoreBackup();
+  });
+  window.financeAPI.onRestoreProgress(handleRestoreProgress);
 }
 
 function selectView(name) {
@@ -920,15 +974,137 @@ async function saveSettings() {
 
 async function createBackup() {
   const passphrase = byId('backupPassphrase').value;
-  try { const result = await window.financeAPI.createBackup(passphrase); byId('backupStatus').textContent = result.canceled ? 'Backup cancelled.' : `${result.fileName} created.`; }
+  const button = byId('createBackupButton');
+  button.disabled = true;
+  byId('backupStatus').textContent = 'Creating and verifying a consistent backup…';
+  try { const result = await window.financeAPI.createBackup(passphrase); byId('backupStatus').textContent = result.canceled ? 'Backup cancelled.' : `${result.fileName} created and verified.`; }
   catch (error) { byId('backupStatus').textContent = error.message; }
+  finally { button.disabled = false; }
 }
 
 async function restoreBackup() {
   const passphrase = byId('backupPassphrase').value;
-  if (!window.confirm('Restore a backup? Current data will be saved automatically first.')) return;
-  try { const result = await window.financeAPI.restoreBackup(passphrase); if (!result.canceled) { state = result.state; populateMonthOptions(); populateAccountOptions(); render(); byId('backupStatus').textContent = 'Backup restored.'; } }
-  catch (error) { byId('backupStatus').textContent = error.message; }
+  const button = byId('restoreBackupButton');
+  button.disabled = true;
+  byId('backupStatus').textContent = 'Select a backup to check…';
+  try {
+    const result = await window.financeAPI.selectRestoreBackup(passphrase);
+    if (result?.status === 'blocked') throw new Error(result.message || 'Backup restore is currently unavailable.');
+    if (result.canceled) { byId('backupStatus').textContent = 'Restore cancelled.'; return; }
+    restoreToken = result.token;
+    restoreInProgress = false;
+    restoreCanCancel = true;
+    renderRestoreConfirmation(result.backup);
+    byId('backupStatus').textContent = 'Backup checked. Review the restore details.';
+    byId('restoreDialog').showModal();
+  } catch (error) {
+    byId('backupStatus').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderRestoreConfirmation(backup) {
+  byId('restoreDialogTitle').textContent = 'Restore this backup?';
+  byId('restoreExplanation').textContent = 'OneStep will verify this backup and create a safety copy of your current data before replacing anything. Your financial state and saved documents will be restored together.';
+  byId('restoreCreatedAt').textContent = formatRecoveryDate(backup.createdAt);
+  byId('restoreApplicationVersion').textContent = backup.applicationVersion ? `v${backup.applicationVersion}` : 'Legacy backup';
+  byId('restoreDocumentCount').textContent = `${backup.documentCount} saved document${backup.documentCount === 1 ? '' : 's'}`;
+  byId('restoreValidation').textContent = backup.complete ? (backup.migrationRequired ? 'Valid · migration required' : 'Complete and valid') : 'Limited legacy backup';
+  byId('restoreMetadata').hidden = false;
+  byId('restoreNotice').hidden = false;
+  byId('restoreProgress').hidden = true;
+  byId('restoreProgress').querySelectorAll('li').forEach((item) => item.className = '');
+  byId('restoreStatus').textContent = backup.complete ? '' : 'This backup does not include the complete document vault and cannot be used for a normal restore.';
+  byId('confirmRestoreButton').hidden = false;
+  byId('confirmRestoreButton').disabled = !backup.complete;
+  byId('cancelRestoreButton').textContent = 'Cancel';
+  byId('closeRestoreButton').hidden = false;
+}
+
+async function confirmRestoreBackup() {
+  if (!restoreToken || restoreInProgress) return;
+  restoreInProgress = true;
+  restoreCanCancel = true;
+  byId('confirmRestoreButton').disabled = true;
+  byId('confirmRestoreButton').hidden = true;
+  byId('restoreMetadata').hidden = true;
+  byId('restoreNotice').hidden = true;
+  byId('restoreProgress').hidden = false;
+  byId('restoreStatus').textContent = 'Preparing backup…';
+  const token = restoreToken;
+  try {
+    const result = await window.financeAPI.restoreBackup(token);
+    if (result.status === 'restored') {
+      activateNormalMode({ status: 'normal', mode: 'normal', source: 'restored_backup', state: result.state, encryption: result.encryption || encryption });
+      showRestoreOutcome('Backup restored successfully', 'Your financial data and saved documents have been verified and are ready to use.');
+      byId('backupStatus').textContent = 'Backup restored successfully.';
+    } else if (result.status === 'rolled_back') {
+      activateNormalMode({ status: 'normal', mode: 'normal', source: 'restore_rollback', state: result.state, encryption: result.encryption || encryption });
+      showRestoreOutcome('The backup could not be restored', 'OneStep returned your data to the state it was in before the restore began. Nothing from the incomplete restore has been kept as active data.');
+      byId('backupStatus').textContent = 'Restore failed, but your previous data was recovered.';
+    } else if (result.status === 'recovery_required') {
+      byId('restoreDialog').close();
+      showRecoveryMode(result);
+    } else if (result.status === 'blocked') {
+      throw new Error(result.message || 'The restore could not start.');
+    }
+  } catch (error) {
+    if (error.message.includes('cancelled')) {
+      byId('restoreDialog').close();
+      byId('backupStatus').textContent = 'Restore cancelled before live data was changed.';
+    } else {
+      showRestoreOutcome('The backup could not be restored', `${error.message} Your current data has not been replaced.`);
+      byId('backupStatus').textContent = error.message;
+    }
+  } finally {
+    restoreInProgress = false;
+    restoreCanCancel = true;
+    restoreToken = null;
+  }
+}
+
+async function cancelRestoreBackup() {
+  if (!restoreToken) {
+    if (byId('restoreDialog').open) byId('restoreDialog').close();
+    return;
+  }
+  const result = await window.financeAPI.cancelRestoreBackup(restoreToken).catch(() => ({ canceled: false }));
+  if (restoreInProgress && !result.canceled) return;
+  if (!restoreInProgress) restoreToken = null;
+  if (byId('restoreDialog').open) byId('restoreDialog').close();
+  const status = recoveryResult ? byId('recoveryStatus') : byId('backupStatus');
+  status.textContent = restoreInProgress ? 'Cancelling before live data is changed…' : 'Restore cancelled.';
+}
+
+function handleRestoreProgress(progress = {}) {
+  if (!restoreInProgress) return;
+  restoreCanCancel = Boolean(progress.canCancel);
+  byId('cancelRestoreButton').hidden = !restoreCanCancel;
+  byId('closeRestoreButton').hidden = !restoreCanCancel;
+  const stages = [...byId('restoreProgress').querySelectorAll('li')];
+  const activeIndex = stages.findIndex((item) => item.dataset.restoreStage === progress.stage);
+  stages.forEach((item, index) => { item.className = index < activeIndex ? 'complete' : index === activeIndex ? 'active' : ''; });
+  const labels = {
+    preparing_backup: 'Preparing backup…', checking_backup_integrity: 'Checking backup integrity…', creating_safety_copy: 'Creating a safety copy…',
+    ready_to_replace: 'Safety copy verified. Preparing to replace live data…', restoring_financial_data: 'Restoring financial data…', restoring_documents: 'Restoring documents…',
+    verifying_restored_data: 'Verifying restored data…', finishing: 'Finishing…'
+  };
+  byId('restoreStatus').textContent = labels[progress.stage] || 'Restore in progress…';
+}
+
+function showRestoreOutcome(title, explanation) {
+  byId('restoreDialogTitle').textContent = title;
+  byId('restoreExplanation').textContent = explanation;
+  byId('restoreExplanation').hidden = false;
+  byId('restoreProgress').hidden = true;
+  byId('restoreMetadata').hidden = true;
+  byId('restoreNotice').hidden = true;
+  byId('restoreStatus').textContent = '';
+  byId('confirmRestoreButton').hidden = true;
+  byId('cancelRestoreButton').hidden = false;
+  byId('cancelRestoreButton').textContent = 'Close';
+  byId('closeRestoreButton').hidden = false;
 }
 
 async function checkForUpdates() {

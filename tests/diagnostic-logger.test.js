@@ -56,11 +56,16 @@ test('recovery diagnostics retain only safe reason codes', async (t) => {
     reasonCode: 'decryption_failure',
     error: new Error('balance £9876.54 key=fictional-secret decrypted={"name":"Private User"}')
   });
+  await logger.record('BACKUP_RESTORE_FAILED', {
+    reasonCode: 'restore_rollback_failed',
+    error: new Error('raw PDF body and fictional account token must not be retained')
+  });
   const report = await logger.buildReport();
 
   assert.match(report.text, /DAT-103 STATE_RECOVERY_REQUIRED/);
   assert.match(report.text, /reason_code=decryption_failure/);
-  assert.doesNotMatch(report.text, /9876|fictional-secret|Private User|decrypted/);
+  assert.match(report.text, /BAK-102 BACKUP_RESTORE_FAILED.*reason_code=restore_rollback_failed/);
+  assert.doesNotMatch(report.text, /9876|fictional-secret|Private User|decrypted|raw PDF body|fictional account token/);
 });
 
 test('diagnostics expire after fourteen days and can be deleted locally', async (t) => {

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   saveState: (state) => ipcRenderer.invoke('state:save', state),
   retryRecovery: () => ipcRenderer.invoke('recovery:retry'),
   restoreRecoveryBackup: (backupId) => ipcRenderer.invoke('recovery:restore-backup', backupId),
+  selectRecoveryPortableBackup: (passphrase) => ipcRenderer.invoke('recovery:select-portable-backup', passphrase),
   requestFreshStart: () => ipcRenderer.invoke('recovery:fresh-start:request'),
   cancelFreshStart: (token) => ipcRenderer.invoke('recovery:fresh-start:cancel', token),
   confirmFreshStart: (token) => ipcRenderer.invoke('recovery:fresh-start:confirm', token),
@@ -12,7 +13,9 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   openDocument: (id) => ipcRenderer.invoke('document:open', id),
   deleteDocument: (id) => ipcRenderer.invoke('document:delete', id),
   createBackup: (passphrase) => ipcRenderer.invoke('backup:create', passphrase),
-  restoreBackup: (passphrase) => ipcRenderer.invoke('backup:restore', passphrase),
+  selectRestoreBackup: (passphrase) => ipcRenderer.invoke('backup:select-restore', passphrase),
+  restoreBackup: (token) => ipcRenderer.invoke('backup:restore', token),
+  cancelRestoreBackup: (token) => ipcRenderer.invoke('backup:restore-cancel', token),
   checkLocalModel: (model) => ipcRenderer.invoke('llm:status', model),
   askLocalModel: (question) => ipcRenderer.invoke('llm:ask', question),
   exportCsv: (csv) => ipcRenderer.invoke('export:csv', csv),
@@ -26,5 +29,10 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
     const listener = (_event, status) => callback(status);
     ipcRenderer.on('update:status', listener);
     return () => ipcRenderer.removeListener('update:status', listener);
+  },
+  onRestoreProgress: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('backup:restore-progress', listener);
+    return () => ipcRenderer.removeListener('backup:restore-progress', listener);
   }
 }));
