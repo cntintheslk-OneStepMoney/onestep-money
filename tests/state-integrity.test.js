@@ -90,6 +90,19 @@ test('generated-action snoozes survive save, restart and encrypted backup restor
   assert.equal(buildNextAction(cleaned).id, 'generated-first-account');
 });
 
+test('the all-time reporting selection survives saves and restarts', async (t) => {
+  const harness = await createHarness(t);
+  let state = (await harness.store.loadState()).state;
+  state.settings.selectedMonth = 'all';
+  state = await harness.store.saveState(state);
+  assert.equal(state.settings.selectedMonth, 'all');
+
+  const restarted = new FinanceDataStore(harness.directory, seedPath, null, { secureStorage: secureStorage() });
+  await restarted.initialise();
+  const loaded = (await restarted.loadState()).state;
+  assert.equal(loaded.settings.selectedMonth, 'all');
+});
+
 async function createHarness(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-integrity-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -1876,7 +1876,7 @@ function currentMonth() {
 }
 
 const SETTING_NORMALISERS = Object.freeze({
-  selectedMonth: (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || '')) ? String(value) : currentMonth(),
+  selectedMonth: (value) => value === 'all' || /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || '')) ? String(value) : currentMonth(),
   extraDebtPayment: (value) => finiteNumber(value, 0),
   emergencyBufferTarget: (value) => finiteNumber(value, 500),
   emergencyBufferBalance: (value) => finiteNumber(value, 0),
