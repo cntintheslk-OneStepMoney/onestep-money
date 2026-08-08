@@ -12,6 +12,8 @@ New installations start completely blank. This repository contains no personal a
 
 - Gives one small immediate action instead of a crowded to-do list.
 - Imports bank statements with a review step before saving records.
+- Synchronises reconciled statement balances and keeps linked overdraft usage up to date automatically.
+- Imports PDF credit reports, updates matched borrowing and adds newly reported debts or overdrafts without duplicating tracked accounts.
 - Separates debts from overdrafts while comparing both safely in payoff forecasts.
 - Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips.
 - Stores imported originals in an encrypted local document vault.
@@ -26,17 +28,24 @@ New installations start completely blank. This repository contains no personal a
 
 Bank statements:
 
-- CSV with signed amounts or separate debit and credit columns
+- CSV, TSV and semicolon-delimited exports, including common UK-bank headings and optional preamble rows
 - QIF
-- OFX
+- OFX and QFX
 - JSON transaction arrays
-- PDF layouts currently recognised for Nationwide, Halifax and Monzo
+- PDF layouts recognised for Nationwide, Halifax, Lloyds, Bank of Scotland and Monzo
+- Conservative fallback for accessible PDFs with labelled Date, Description and Amount or Money In/Money Out columns
 
 Payslips:
 
 - JPA E017 PDF payslips
 
-Unrecognised layouts are rejected visibly. Invalid dates and amounts are never silently replaced with zero or today's date.
+Credit reports:
+
+- PDF reports from Experian, ClearScore, Credit Karma, TransUnion, Equifax and TotallyMoney
+- Clearly labelled provider, report date, score, lender, balance, limit, payment, APR, status and account-date fields are extracted when present
+- Positive unmatched balances are added automatically after the import review; matched debts are updated and zero-balance untracked accounts are not created
+
+Unrecognised layouts are rejected visibly. Invalid dates and amounts are never silently replaced with zero or today's date, and PDF imports that do not reconcile are marked for review.
 
 ## Privacy model
 

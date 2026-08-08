@@ -13,7 +13,7 @@ for (const file of javascript) {
 }
 
 const seed = JSON.parse(fs.readFileSync(path.join(root, 'seed-data.json'), 'utf8'));
-const emptyCollections = ['accounts', 'transactions', 'payslips', 'taxDocuments', 'debts', 'overdrafts', 'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches'];
+const emptyCollections = ['accounts', 'transactions', 'payslips', 'taxDocuments', 'creditReports', 'debts', 'overdrafts', 'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches'];
 for (const collection of emptyCollections) {
   if (!Array.isArray(seed[collection]) || seed[collection].length) throw new Error(`Public seed ${collection} must be an empty array.`);
 }
