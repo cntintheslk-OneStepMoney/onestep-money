@@ -1,7 +1,7 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn
+  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, resolvePossibleDuplicate
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
@@ -439,13 +439,19 @@ function renderTransactions() {
     badges.className = 'note-preview';
     badges.textContent = budgetByTransaction.get(item.id)?.category || (uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
     if (item.transferStatus !== 'no') badges.textContent += ` · ${item.transferStatus} transfer`;
+    if (item.duplicateStatus === 'possible') {
+      const duplicateLabel = item.reviewStatus === 'accepted' ? 'accepted possible duplicate'
+        : item.reviewStatus === 'rejected' ? 'excluded duplicate'
+          : 'possible duplicate · excluded pending review';
+      badges.textContent += ` · ${duplicateLabel}`;
+    }
     description.append(badges);
     row.append(description);
     row.append(amountCell(item.incoming, 'incoming'));
     row.append(amountCell(item.outgoing, 'outgoing'));
     row.append(amountCell(item.runningBalance, ''));
     row.append(cell(item.notes || '—', 'note-preview'));
-    row.append(actionCell('transaction', item.id));
+    row.append(transactionActionCell(item));
     body.append(row);
   }
   if (!rows.length) {
@@ -949,7 +955,18 @@ async function animateFocusPanel(className, duration) {
   panel.classList.remove(className);
 }
 
-function handleEditClick(event) {
+async function handleEditClick(event) {
+  const review = event.target.closest('[data-duplicate-review]');
+  if (review) {
+    const decision = review.dataset.duplicateReview;
+    const label = decision === 'accepted' ? 'include this payment in trusted financial totals' : 'keep this payment excluded as a duplicate';
+    if (!window.confirm(`Confirm that OneStep should ${label}?`)) return;
+    const next = resolvePossibleDuplicate(state, review.dataset.id, decision);
+    await saveState(next);
+    render();
+    showToast(decision === 'accepted' ? 'Payment accepted and included in financial totals.' : 'Duplicate confirmed and kept out of financial totals.');
+    return;
+  }
   const button = event.target.closest('[data-edit]');
   if (button) openEditor(button.dataset.edit, button.dataset.id);
 }
@@ -1310,10 +1327,12 @@ function renderUpdateUi() {
   document.querySelectorAll('[data-download-update]').forEach((button) => {
     button.hidden = !view.downloadVisible;
     button.disabled = view.downloadDisabled;
+    button.textContent = view.downloadLabel;
   });
   document.querySelectorAll('[data-restart-update]').forEach((button) => {
     button.hidden = !view.installVisible;
     button.disabled = view.installDisabled;
+    button.textContent = view.installLabel;
   });
   document.querySelectorAll('[data-view-update]').forEach((button) => { button.hidden = !view.viewUpdateVisible; });
   document.querySelectorAll('[data-update-progress], #settingsUpdateProgress').forEach((progress) => {
@@ -1389,6 +1408,15 @@ async function saveState(nextState = state) {
   synchroniseSelectedMonth(nextState);
   const saved = await window.financeAPI.saveState(nextState);
   if (saved?.status === 'blocked') throw new Error(saved.message || 'Saving is paused while recovery is required.');
+  if (saved?.status === 'conflict') {
+    state = saved.state;
+    synchroniseSelectedMonth(state);
+    render();
+    showToast(saved.message);
+    const error = new Error(saved.message);
+    error.code = 'STATE_REVISION_CONFLICT';
+    throw error;
+  }
   state = saved;
 }
 
@@ -1450,6 +1478,22 @@ function entityCard(type, item, stats, editable = true) {
 }
 
 function actionCell(type, id) { const cellElement = cell(); cellElement.append(actionButton(type, id)); return cellElement; }
+function transactionActionCell(item) {
+  const cellElement = cell();
+  const actions = element('div', 'transaction-actions');
+  actions.append(actionButton('transaction', item.id));
+  if (item.duplicateStatus === 'possible' && item.reviewStatus === 'pending') {
+    const accept = element('button', 'duplicate-review-button accept', 'Accept');
+    accept.type = 'button'; accept.dataset.duplicateReview = 'accepted'; accept.dataset.id = item.id;
+    accept.setAttribute('aria-label', 'Accept possible duplicate as a genuine payment');
+    const reject = element('button', 'duplicate-review-button reject', 'Duplicate');
+    reject.type = 'button'; reject.dataset.duplicateReview = 'rejected'; reject.dataset.id = item.id;
+    reject.setAttribute('aria-label', 'Confirm this possible duplicate should remain excluded');
+    actions.append(accept, reject);
+  }
+  cellElement.append(actions);
+  return cellElement;
+}
 function actionButton(type, id, label = 'Edit') { const button = element('button', 'edit-button', label); button.type = 'button'; button.dataset.edit = type; button.dataset.id = id; return button; }
 function stat(label, value, optional = false) { const box = element('div', `entity-stat${optional ? ' optional-stat' : ''}`); append(box, element('span', '', label), element('strong', '', value)); return box; }
 function summaryTile(label, value) { const tile = element('div'); append(tile, element('span', '', String(label)), element('strong', '', String(value))); return tile; }

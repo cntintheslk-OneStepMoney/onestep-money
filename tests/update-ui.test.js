@@ -27,7 +27,9 @@ test('downloading state shows progress and does not expose installation early', 
   const view = updateUiView(state);
 
   assert.equal(view.notificationTitle, 'Downloading update');
-  assert.equal(view.downloadVisible, false);
+  assert.equal(view.downloadVisible, true);
+  assert.equal(view.downloadDisabled, true);
+  assert.equal(view.downloadLabel, 'Downloading update…');
   assert.equal(view.installVisible, false);
   assert.equal(view.progressVisible, true);
   assert.equal(view.progressValue, 63.4);
@@ -81,6 +83,33 @@ test('no-update state clears actions while failure preserves known availability'
   state = applyUpdateStatus(state, { state: 'unavailable', message: 'The update check couldn’t be completed.' });
   assert.equal(updateUiView(state).versionLabel, 'v2.1.13 · Update available');
   assert.equal(updateUiView(state).downloadVisible, true);
+  assert.equal(updateUiView(state).downloadLabel, 'Retry download');
+});
+
+test('settings update actions use stable equal-height two-row grid markup in every primary state', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+
+  assert.match(html, /class="update-action-grid"/);
+  assert.match(html, /id="checkUpdateButton"[\s\S]+data-view-update[\s\S]+class="primary-button update-primary-action" data-download-update/);
+  assert.match(css, /\.update-action-grid \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.update-action-grid > button \{[^}]*height: 44px;[^}]*min-height: 44px/);
+  assert.match(css, /\.update-action-grid \.update-primary-action \{ grid-column: 1 \/ -1; \}/);
+  assert.match(renderer, /button\.textContent = view\.downloadLabel/);
+  assert.match(renderer, /button\.textContent = view\.installLabel/);
+
+  let state = setInstalledVersion(createUpdateUiState(), '2.1.13');
+  state = applyUpdateStatus(state, { state: 'available', version: '2.1.14' });
+  assert.equal(updateUiView(state).downloadLabel, 'Download update');
+  state = applyUpdateStatus(state, { state: 'downloading', version: '2.1.14', percent: 40 });
+  assert.equal(updateUiView(state).downloadVisible, true);
+  state = applyUpdateStatus(state, { state: 'ready', version: '2.1.14' });
+  assert.equal(updateUiView(state).installVisible, true);
+  assert.equal(updateUiView(state).installLabel, 'Restart and install');
+  state = applyUpdateStatus(state, { state: 'installing', version: '2.1.14' });
+  assert.equal(updateUiView(state).installDisabled, true);
+  assert.equal(updateUiView(state).installLabel, 'Restarting to install…');
 });
 
 test('notification markup and styles preserve accessibility, minimum sizing and reduced motion', () => {
