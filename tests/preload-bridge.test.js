@@ -58,8 +58,10 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   await exposed.api.recordRendererFault('RENDERER_UNHANDLED_ERROR');
   await exposed.api.getUpdateStatus();
   await exposed.api.checkForUpdates();
+  await exposed.api.downloadAvailableUpdate();
+  await exposed.api.restartAndInstallUpdate();
   await exposed.api.openAvailableUpdate();
-  assert.equal(exposed.api.installUpdate, undefined);
+  assert.equal(exposed.api.openExternalUrl, undefined);
   assert.deepEqual(invocations, [
     ['app:version'],
     ['state:load'],
@@ -81,6 +83,8 @@ test('sandboxed preload exposes the complete desktop API', async () => {
     ['diagnostics:renderer-fault', 'RENDERER_UNHANDLED_ERROR'],
     ['update:get-status'],
     ['update:check'],
+    ['update:download'],
+    ['update:restart-and-install'],
     ['update:open-release']
   ]);
 

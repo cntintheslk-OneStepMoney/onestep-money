@@ -305,6 +305,8 @@ function bindEvents() {
   byId('restoreBackupButton').addEventListener('click', restoreBackup);
   byId('checkUpdateButton').addEventListener('click', checkForUpdates);
   byId('dismissUpdateNotificationButton').addEventListener('click', dismissUpdateNotification);
+  document.querySelectorAll('[data-download-update]').forEach((button) => button.addEventListener('click', downloadAvailableUpdate));
+  document.querySelectorAll('[data-restart-update]').forEach((button) => button.addEventListener('click', restartAndInstallUpdate));
   document.querySelectorAll('[data-view-update]').forEach((button) => button.addEventListener('click', openAvailableUpdate));
   byId('reviewDiagnosticsButton').addEventListener('click', reviewDiagnostics);
   byId('exportDiagnosticsButton').addEventListener('click', exportDiagnostics);
@@ -1247,6 +1249,30 @@ async function openAvailableUpdate() {
   }
 }
 
+async function downloadAvailableUpdate() {
+  try {
+    handleUpdateStatus(await window.financeAPI.downloadAvailableUpdate());
+  } catch {
+    handleUpdateStatus({
+      state: 'available',
+      version: updateUiState.availableVersion,
+      message: 'The update couldn’t be downloaded. Check your connection and try again.'
+    });
+  }
+}
+
+async function restartAndInstallUpdate() {
+  try {
+    handleUpdateStatus(await window.financeAPI.restartAndInstallUpdate());
+  } catch {
+    handleUpdateStatus({
+      state: 'ready',
+      version: updateUiState.availableVersion,
+      message: 'OneStep could not restart into the update. Your data is safe; try again when ready.'
+    });
+  }
+}
+
 function handleUpdateStatus(status = {}) {
   updateUiState = applyUpdateStatus(updateUiState, status);
   renderUpdateUi();
@@ -1264,7 +1290,21 @@ function renderUpdateUi() {
   version.setAttribute('aria-label', view.versionAriaLabel);
   byId('updateStatus').textContent = view.settingsStatus;
   byId('checkUpdateButton').disabled = view.checkDisabled;
+  document.querySelectorAll('[data-download-update]').forEach((button) => {
+    button.hidden = !view.downloadVisible;
+    button.disabled = view.downloadDisabled;
+  });
+  document.querySelectorAll('[data-restart-update]').forEach((button) => {
+    button.hidden = !view.installVisible;
+    button.disabled = view.installDisabled;
+  });
   document.querySelectorAll('[data-view-update]').forEach((button) => { button.hidden = !view.viewUpdateVisible; });
+  document.querySelectorAll('[data-update-progress], #settingsUpdateProgress').forEach((progress) => {
+    progress.hidden = !view.progressVisible;
+    progress.value = view.progressValue;
+    progress.setAttribute('aria-label', view.progressLabel);
+  });
+  byId('updateNotificationTitle').textContent = view.notificationTitle;
   byId('updateNotificationMessage').textContent = view.notificationMessage;
   byId('updateNotificationRegion').hidden = !view.notificationVisible;
   byId('appShell').classList.toggle('update-notification-visible', view.notificationVisible);

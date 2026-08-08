@@ -158,7 +158,7 @@
             <article class="panel"><h2>Planning</h2><label>Dependable monthly income<input id="dependableIncomeInput" type="number" min="0" step="0.01" /></label><label>Extra debt-payment target<input id="extraPaymentInput" type="number" min="0" step="10" /></label><label>Emergency-buffer target<input id="bufferTargetInput" type="number" min="0" step="50" /></label><label>Current emergency buffer<input id="bufferBalanceInput" type="number" min="0" step="1" /></label><button id="saveSettingsButton" class="primary-button">Save settings</button></article>
             <article class="panel"><h2>Local model</h2><label>Ollama model<input id="llmModelInput" type="text" value="qwen2.5:1.5b" /></label><p class="muted">Recommended small model: qwen2.5:1.5b. The app connects only to Ollama on 127.0.0.1.</p><button id="checkModelButton" class="secondary-button">Check model</button></article>
             <article class="panel"><h2>Encrypted backup</h2><p class="muted">A portable backup includes one verified snapshot of your financial data and encrypted document vault. Use a password you will remember.</p><label>Backup password<input id="backupPassphrase" type="password" minlength="8" autocomplete="new-password" /></label><div class="button-row"><button id="createBackupButton" class="primary-button">Create backup</button><button id="restoreBackupButton" class="secondary-button">Restore backup</button></div><p id="backupStatus" class="muted" aria-live="polite"></p></article>
-            <article class="panel"><h2>Updates</h2><p id="updateStatus" class="muted" aria-live="polite">Updates are checked automatically. OneStep never downloads or installs them.</p><div class="button-row"><button id="checkUpdateButton" class="secondary-button">Check for updates</button><button class="primary-button" data-view-update hidden>View update</button></div></article>
+            <article class="panel"><h2>Updates</h2><p id="updateStatus" class="muted" aria-live="polite">Updates are checked automatically. Downloads and installation only start when you choose.</p><progress id="settingsUpdateProgress" class="update-progress" max="100" value="0" aria-label="Update download 0% complete" hidden></progress><div class="button-row"><button id="checkUpdateButton" class="secondary-button">Check for updates</button><button class="primary-button" data-download-update hidden>Download update</button><button class="primary-button" data-restart-update hidden>Restart and install</button><button class="secondary-button" data-view-update hidden>View on GitHub</button></div></article>
             <article class="panel"><h2>Diagnostics</h2><p class="muted">Fault codes and basic device details stay on this device. Financial data, document contents, names, amounts, notes, filenames and paths are never logged.</p><p class="muted">Detailed entries are encrypted, kept for up to 14 days and never uploaded automatically. Review the report before choosing where to share it.</p><div class="button-row"><button id="reviewDiagnosticsButton" class="primary-button">Review &amp; export</button><button id="deleteDiagnosticsButton" class="danger-button">Delete diagnostics</button></div><p id="diagnosticsStatus" class="muted" aria-live="polite"></p></article>
             <article class="panel"><h2>Privacy</h2><p id="privacyDetails" class="muted"></p><p class="muted">No cloud sync, analytics or external AI. Imported files are checksum-checked, encrypted and never served by the preview server.</p></article>
           </div>
@@ -171,7 +171,12 @@
           <div class="update-notification-copy">
             <h2 id="updateNotificationTitle">Update available</h2>
             <p id="updateNotificationMessage"></p>
-            <button class="update-notification-action" type="button" data-view-update>View update</button>
+            <progress class="update-progress update-notification-progress" max="100" value="0" aria-label="Update download 0% complete" data-update-progress hidden></progress>
+            <div class="update-notification-actions">
+              <button class="update-notification-primary" type="button" data-download-update>Download update</button>
+              <button class="update-notification-primary" type="button" data-restart-update hidden>Restart and install</button>
+              <button class="update-notification-action" type="button" data-view-update>View on GitHub</button>
+            </div>
           </div>
         </aside>
       </div>
