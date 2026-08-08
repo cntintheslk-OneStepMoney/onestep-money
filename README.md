@@ -13,7 +13,8 @@ New installations start completely blank. This repository contains no personal a
 - Gives one small immediate action instead of a crowded to-do list.
 - Imports bank statements with a review step before saving records.
 - Synchronises reconciled statement balances and keeps linked overdraft usage up to date automatically.
-- Imports PDF credit reports, updates matched borrowing and adds newly reported debts or overdrafts without duplicating tracked accounts.
+- Imports PDF credit reports through a dated reconciliation preview that separates matches, updates, new borrowing, conflicts and accounts needing review.
+- Preserves newer balances and known defaults, arrears or arrangements when a report is older, incomplete or ambiguous, while keeping current-account borrowing as overdrafts.
 - Separates debts from overdrafts while applying one shared safety assessment to payoff forecasts, generated actions and local guidance.
 - Protects required payments and confirmed arrangements before considering an optional debt payment.
 - Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips.
