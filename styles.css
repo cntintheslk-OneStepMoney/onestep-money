@@ -673,6 +673,21 @@ tr:last-child td { border-bottom: 0; }
 }
 .update-notification-copy h2 { margin: 0 0 0.4rem; color: #fff; font-size: 0.98rem; letter-spacing: -0.015em; }
 .update-notification-copy p { margin: 0 0 0.72rem; color: rgba(236, 244, 251, 0.84); font-size: 0.79rem; line-height: 1.5; }
+.update-progress {
+  width: min(100%, 420px);
+  height: 7px;
+  margin: 0.72rem 0 0.15rem;
+  overflow: hidden;
+  accent-color: var(--teal);
+  border: 0;
+  border-radius: 999px;
+}
+.update-progress::-webkit-progress-bar { background: rgba(11, 61, 98, 0.12); border-radius: 999px; }
+.update-progress::-webkit-progress-value { background: var(--teal); border-radius: 999px; transition: width 160ms ease; }
+.update-notification-progress { width: 100%; margin: 0 0 0.8rem; accent-color: #55ddc5; }
+.update-notification-progress::-webkit-progress-bar { background: rgba(255, 255, 255, 0.13); }
+.update-notification-progress::-webkit-progress-value { background: #55ddc5; }
+.update-notification-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem 0.85rem; }
 .update-notification-close {
   position: absolute;
   top: 0.55rem;
@@ -690,6 +705,17 @@ tr:last-child td { border-bottom: 0; }
   line-height: 1;
 }
 .update-notification-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.update-notification-primary {
+  min-height: 34px;
+  padding: 0.45rem 0.72rem;
+  color: #06223b;
+  background: #78ebd7;
+  border: 0;
+  border-radius: 9px;
+  font-size: 0.76rem;
+  font-weight: 820;
+}
+.update-notification-primary:hover { background: #a4f5e7; transform: translateY(-1px); }
 .update-notification-action {
   padding: 0.1rem 0;
   color: #78ebd7;
