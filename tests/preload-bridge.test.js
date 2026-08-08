@@ -41,11 +41,19 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   await exposed.api.loadState();
   await exposed.api.saveState({ ok: true });
   await exposed.api.importFiles({ kind: 'statement' });
+  await exposed.api.previewDiagnostics();
+  await exposed.api.exportDiagnostics('preview-token');
+  await exposed.api.deleteDiagnostics();
+  await exposed.api.recordRendererFault('RENDERER_UNHANDLED_ERROR');
   await exposed.api.checkForUpdates();
   assert.deepEqual(invocations, [
     ['state:load'],
     ['state:save', { ok: true }],
     ['import:choose', { kind: 'statement' }],
+    ['diagnostics:preview'],
+    ['diagnostics:export', 'preview-token'],
+    ['diagnostics:delete'],
+    ['diagnostics:renderer-fault', 'RENDERER_UNHANDLED_ERROR'],
     ['update:check']
   ]);
 
