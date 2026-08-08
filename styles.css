@@ -619,6 +619,10 @@ tr:last-child td { border-bottom: 0; }
 .import-summary div { display: grid; gap: 0.2rem; padding: 0.75rem; background: #f3f8fa; border: 1px solid #e7eef3; border-radius: 11px; }
 .import-summary span { color: var(--muted); font-size: 0.69rem; }
 .import-summary strong { color: var(--navy); font-variant-numeric: tabular-nums; }
+.import-changes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; margin-top: 0.7rem; }
+.import-change { display: grid; gap: 0.18rem; padding: 0.72rem; border-left: 3px solid var(--teal); background: #f8fbfc; border-radius: 8px; }
+.import-change strong { color: var(--teal-dark); font-size: 0.68rem; letter-spacing: 0.07em; }
+.import-change span { color: var(--navy); font-size: 0.83rem; }
 .preview-table { max-height: 390px; margin-top: 0.8rem; }
 .diagnostic-preview { max-height: 420px; overflow: auto; margin: 0.8rem 0 0; border: 1px solid var(--line); border-radius: 12px; background: #111820; color: #dce3ec; padding: 1rem; font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .restore-modal { padding: 1.25rem; }
@@ -758,6 +762,7 @@ tr:last-child td { border-bottom: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .wide-field { grid-column: auto; }
   .import-summary { grid-template-columns: repeat(2, 1fr); }
+  .import-changes { grid-template-columns: 1fr; }
   .chat-form { grid-template-columns: 1fr; }
 }
 
