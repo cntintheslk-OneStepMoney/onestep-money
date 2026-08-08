@@ -69,6 +69,19 @@ export function calculateBudgetRows(state, month = state.settings?.selectedMonth
   return calculateBudgetAnalysis(state, month).rows;
 }
 
+export function removeBudgetCategory(state, budgetId) {
+  const next = structuredClone(state);
+  const budgetExists = (next.budgets || []).some((budget) => budget.id === budgetId);
+  if (!budgetExists) throw new Error('This budget category is no longer available.');
+  next.budgets = next.budgets.filter((budget) => budget.id !== budgetId);
+  for (const transaction of next.transactions || []) {
+    if (transaction.budgetCategoryId !== budgetId) continue;
+    transaction.budgetCategoryId = '';
+    transaction.categorySource = 'manual';
+  }
+  return next;
+}
+
 export function calculateBudgetAnalysis(state, month = state.settings?.selectedMonth) {
   const budgets = state.budgets || [];
   const transactions = periodTransactions(state.transactions, month);
@@ -161,7 +174,7 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
       progressPercent: plannedPennies > 0 ? Math.max(0, Math.round(((actualPennies.get(String(budget.id)) || 0) / plannedPennies) * 100)) : null,
       contributions: contributions.get(String(budget.id)) || []
     };
-  });
+  }).sort(compareBudgetUsageDescending);
   const plannedPennies = rows.reduce((total, row) => total + moneyToPennies(row.planned), 0);
   const categorisedPennies = rows.reduce((total, row) => total + moneyToPennies(row.actual), 0);
   const totalActualPennies = categorisedPennies + uncategorisedPennies;
@@ -176,6 +189,20 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
     coveragePercent: eligibleGrossPennies > 0 ? Math.round((categorisedGrossPennies / eligibleGrossPennies) * 100) : 100,
     uncategorisedTransactionIds
   };
+}
+
+function compareBudgetUsageDescending(left, right) {
+  const leftUsage = budgetUsageRatio(left);
+  const rightUsage = budgetUsageRatio(right);
+  if (leftUsage === rightUsage) return 0;
+  return rightUsage > leftUsage ? 1 : -1;
+}
+
+function budgetUsageRatio(row) {
+  const plannedPennies = moneyToPennies(row.planned);
+  const actualPennies = moneyToPennies(row.actual);
+  if (plannedPennies > 0) return Math.max(0, actualPennies / plannedPennies);
+  return actualPennies > 0 ? Number.POSITIVE_INFINITY : 0;
 }
 
 export function buildNextAction(state, now = new Date()) {
