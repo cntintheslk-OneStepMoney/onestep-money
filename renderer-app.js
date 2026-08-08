@@ -1,5 +1,5 @@
 import {
-  buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
+  availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
   creditReportDebtStatus, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
   hasCompletedCheckIn, planCreditReportAccounts, syncStatementAccount
@@ -11,6 +11,7 @@ let pendingAction;
 let importQueue = [];
 let currentImport = null;
 let editorContext = null;
+let diagnosticPreviewToken = null;
 
 const viewMeta = {
   today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
@@ -19,6 +20,9 @@ const viewMeta = {
 };
 
 const byId = (id) => document.getElementById(id);
+
+window.addEventListener('error', () => window.financeAPI?.recordRendererFault('RENDERER_UNHANDLED_ERROR').catch(() => {}));
+window.addEventListener('unhandledrejection', () => window.financeAPI?.recordRendererFault('RENDERER_UNHANDLED_REJECTION').catch(() => {}));
 
 initialise();
 
@@ -76,6 +80,9 @@ function bindEvents() {
   byId('restoreBackupButton').addEventListener('click', restoreBackup);
   byId('checkUpdateButton').addEventListener('click', checkForUpdates);
   byId('installUpdateButton').addEventListener('click', installUpdate);
+  byId('reviewDiagnosticsButton').addEventListener('click', reviewDiagnostics);
+  byId('exportDiagnosticsButton').addEventListener('click', exportDiagnostics);
+  byId('deleteDiagnosticsButton').addEventListener('click', deleteDiagnostics);
   window.financeAPI.onUpdateStatus(handleUpdateStatus);
 }
 
@@ -88,6 +95,7 @@ function selectView(name) {
 }
 
 function render() {
+  populateMonthOptions();
   const month = state.settings.selectedMonth;
   const summary = calculatePeriodSummary(state, month);
   pendingAction = buildNextAction(state);
@@ -772,14 +780,80 @@ function handleUpdateStatus(status = {}) {
   byId('checkUpdateButton').disabled = ['checking', 'downloading'].includes(status.state);
 }
 
+async function reviewDiagnostics() {
+  const status = byId('diagnosticsStatus');
+  const button = byId('reviewDiagnosticsButton');
+  button.disabled = true;
+  status.textContent = 'Preparing a private preview…';
+  try {
+    const report = await window.financeAPI.previewDiagnostics();
+    diagnosticPreviewToken = report.token;
+    byId('diagnosticsPreview').textContent = report.text;
+    byId('diagnosticsSummary').textContent = `${report.entryCount} event${report.entryCount === 1 ? '' : 's'} · ${report.retentionDays}-day retention · ${report.encryptionAvailable ? 'encrypted local detail log active' : 'minimal startup log only'}`;
+    status.textContent = 'Report ready to review. Nothing has been shared.';
+    byId('diagnosticsDialog').showModal();
+  } catch (error) {
+    diagnosticPreviewToken = null;
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function exportDiagnostics() {
+  if (!diagnosticPreviewToken) {
+    byId('diagnosticsStatus').textContent = 'Review the diagnostic report before exporting it.';
+    return;
+  }
+  const button = byId('exportDiagnosticsButton');
+  button.disabled = true;
+  try {
+    const result = await window.financeAPI.exportDiagnostics(diagnosticPreviewToken);
+    if (!result.canceled) {
+      byId('diagnosticsStatus').textContent = `${result.fileName} exported. Nothing was uploaded.`;
+      showToast('Diagnostic report exported.');
+    }
+  } catch (error) {
+    byId('diagnosticsStatus').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteDiagnostics() {
+  if (!window.confirm('Delete all locally stored diagnostic events? This cannot be undone.')) return;
+  const button = byId('deleteDiagnosticsButton');
+  button.disabled = true;
+  try {
+    await window.financeAPI.deleteDiagnostics();
+    diagnosticPreviewToken = null;
+    byId('diagnosticsPreview').textContent = '';
+    byId('diagnosticsStatus').textContent = 'All locally stored diagnostic events were deleted.';
+    showToast('Diagnostics deleted.');
+  } catch (error) {
+    byId('diagnosticsStatus').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function saveAndRender() { await saveState(); render(); }
-async function saveState() { state = await window.financeAPI.saveState(state); }
+async function saveState() {
+  synchroniseSelectedMonth();
+  state = await window.financeAPI.saveState(state);
+}
 
 function populateMonthOptions() {
-  const months = [...new Set([...state.transactions.map((item) => String(item.budgetMonth || item.date).slice(0, 7)), ...state.payslips.map((item) => item.period), state.settings.selectedMonth].filter(Boolean))].sort().reverse();
+  const months = synchroniseSelectedMonth();
   const select = byId('monthSelect'); clear(select);
   for (const month of months) { const option = document.createElement('option'); option.value = month; option.textContent = monthLabel(month); select.append(option); }
   select.value = state.settings.selectedMonth;
+}
+
+function synchroniseSelectedMonth() {
+  const months = availableReportingMonths(state);
+  if (!months.includes(state.settings.selectedMonth)) state.settings.selectedMonth = months[0];
+  return months;
 }
 
 function populateAccountOptions() {
