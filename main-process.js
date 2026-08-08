@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
   registerVaultProtocol();
   registerIpcHandlers();
   createWindow();
-  configureAutoUpdater();
+  await configureAutoUpdater();
   await diagnostics.record('APP_READY');
 
   app.on('activate', () => {
@@ -111,20 +111,37 @@ function createWindow() {
   }
 }
 
-function configureAutoUpdater() {
+async function configureAutoUpdater() {
+  const updateMarkerPath = path.join(app.getPath('userData'), 'pending-update.json');
   updateService = new SafeUpdateService({
     autoUpdater,
     isPackaged: app.isPackaged,
     getCurrentVersion: () => app.getVersion(),
     sendStatus: sendUpdateStatus,
     recordFailure: (error) => diagnostics.record('UPDATE_FAILED', { error }),
-    openExternal: (url) => shell.openExternal(url)
+    openExternal: (url) => shell.openExternal(url),
+    previouslyDownloadedVersion: await readDownloadedUpdateMarker(updateMarkerPath),
+    rememberDownloadedVersion: (version) => fs.writeFile(updateMarkerPath, JSON.stringify({ version }), { encoding: 'utf8', mode: 0o600 }),
+    forgetDownloadedVersion: () => fs.unlink(updateMarkerPath).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    })
   });
   updateService.configure();
 
-  mainWindow.webContents.once('did-finish-load', () => {
+  if (mainWindow.webContents.isLoadingMainFrame()) {
+    mainWindow.webContents.once('did-finish-load', () => updateService.scheduleAutomaticCheck());
+  } else {
     updateService.scheduleAutomaticCheck();
-  });
+  }
+}
+
+async function readDownloadedUpdateMarker(updateMarkerPath) {
+  try {
+    const marker = JSON.parse(await fs.readFile(updateMarkerPath, 'utf8'));
+    return typeof marker.version === 'string' ? marker.version : null;
+  } catch {
+    return null;
+  }
 }
 
 function sendUpdateStatus(status) {
@@ -344,6 +361,12 @@ function registerIpcHandlers() {
     return updateService.check({ manual: true });
   });
   ipcMain.handle('update:get-status', () => updateService.getStatus());
+  ipcMain.handle('update:download', async () => {
+    return updateService.downloadAvailableUpdate();
+  });
+  ipcMain.handle('update:restart-and-install', () => {
+    return updateService.restartAndInstall();
+  });
   ipcMain.handle('update:open-release', async () => {
     return updateService.openAvailableRelease();
   });

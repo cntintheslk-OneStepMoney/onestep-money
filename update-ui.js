@@ -4,9 +4,11 @@ export function createUpdateUiState() {
   return {
     installedVersion: '',
     availableVersion: '',
+    downloadedVersion: '',
+    downloadPercent: 0,
     notificationDismissed: false,
     statusState: 'idle',
-    statusMessage: 'Updates are checked automatically. OneStep never downloads or installs them.'
+    statusMessage: 'Updates are checked automatically. Downloads and installation only start when you choose.'
   };
 }
 
@@ -16,17 +18,29 @@ export function setInstalledVersion(state, value) {
 }
 
 export function applyUpdateStatus(state, status = {}) {
+  const statusState = String(status.state || 'idle');
   const next = {
     ...state,
-    statusState: String(status.state || 'idle'),
+    statusState,
     statusMessage: String(status.message || 'Update status unavailable.')
   };
 
-  if (next.statusState === 'available') {
+  if (['available', 'downloading', 'ready', 'installing'].includes(statusState)) {
     const version = normaliseVersion(status.version);
-    if (version) next.availableVersion = version;
-  } else if (next.statusState === 'current') {
+    if (version && version !== next.availableVersion) {
+      next.availableVersion = version;
+      next.downloadedVersion = '';
+      next.downloadPercent = 0;
+    }
+    if (statusState === 'downloading') next.downloadPercent = clampPercent(status.percent);
+    if (statusState === 'ready' && version) {
+      next.downloadedVersion = version;
+      next.downloadPercent = 100;
+    }
+  } else if (statusState === 'current') {
     next.availableVersion = '';
+    next.downloadedVersion = '';
+    next.downloadPercent = 0;
   }
 
   return next;
@@ -38,19 +52,47 @@ export function dismissUpdateNotification(state) {
 
 export function updateUiView(state) {
   const hasUpdate = Boolean(state.availableVersion);
+  const updateReady = hasUpdate && state.downloadedVersion === state.availableVersion;
+  const downloading = hasUpdate && state.statusState === 'downloading';
+  const installing = hasUpdate && state.statusState === 'installing';
   const installedLabel = state.installedVersion ? `v${state.installedVersion}` : 'Version unavailable';
+  const versionSuffix = updateReady ? 'Update ready' : hasUpdate ? 'Update available' : '';
+  const notificationTitle = installing ? 'Restarting to install' : updateReady ? 'Ready to install' : downloading ? 'Downloading update' : 'Update available';
+
   return {
-    versionLabel: hasUpdate ? `${installedLabel} · Update available` : installedLabel,
-    versionAriaLabel: hasUpdate ? `OneStep Money ${installedLabel}. Update available.` : `OneStep Money ${installedLabel}.`,
+    versionLabel: versionSuffix ? `${installedLabel} · ${versionSuffix}` : installedLabel,
+    versionAriaLabel: versionSuffix ? `OneStep Money ${installedLabel}. ${versionSuffix}.` : `OneStep Money ${installedLabel}.`,
     notificationVisible: hasUpdate && !state.notificationDismissed,
-    notificationMessage: hasUpdate ? `OneStep Money v${state.availableVersion} is available.` : '',
+    notificationTitle,
+    notificationMessage: hasUpdate
+      ? installing
+        ? `OneStep is restarting to install v${state.availableVersion}.`
+        : updateReady
+        ? `OneStep Money v${state.availableVersion} has downloaded. Restart when you’re ready to install it.`
+        : downloading
+          ? `OneStep Money v${state.availableVersion} is downloading. You can keep using the app.`
+          : `OneStep Money v${state.availableVersion} is available.`
+      : '',
     settingsStatus: state.statusMessage,
-    checkDisabled: state.statusState === 'checking',
-    viewUpdateVisible: hasUpdate
+    checkDisabled: ['checking', 'downloading', 'installing'].includes(state.statusState),
+    downloadVisible: hasUpdate && !updateReady && !downloading,
+    downloadDisabled: installing,
+    installVisible: updateReady,
+    installDisabled: installing,
+    viewUpdateVisible: hasUpdate,
+    progressVisible: downloading,
+    progressValue: state.downloadPercent,
+    progressLabel: `Update download ${Math.round(state.downloadPercent)}% complete`
   };
 }
 
 function normaliseVersion(value) {
   const version = String(value || '').trim().replace(/^v/i, '');
   return STABLE_VERSION_PATTERN.test(version) ? version : '';
+}
+
+function clampPercent(value) {
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(100, Math.max(0, percent));
 }
