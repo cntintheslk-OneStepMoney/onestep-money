@@ -39,6 +39,9 @@ async function initialise() {
     byId('desktopRequired').hidden = false;
     return;
   }
+  window.financeAPI.getAppVersion()
+    .then(renderAppVersion)
+    .catch(() => renderAppVersion(''));
   try {
     const loaded = await window.financeAPI.loadState();
     if (loaded.status === 'recovery_required') showRecoveryMode(loaded);
@@ -48,6 +51,11 @@ async function initialise() {
     byId('desktopRequired').hidden = false;
     byId('desktopRequired').querySelector('p').textContent = `The secure data store could not be opened: ${error.message}`;
   }
+}
+
+function renderAppVersion(value) {
+  const version = String(value || '').trim().replace(/^v/i, '');
+  byId('appVersion').textContent = version ? `v${version}` : 'Version unavailable';
 }
 
 function activateNormalMode(loaded) {
