@@ -4,6 +4,10 @@ import {
   creditReportDebtStatus, creditReportStatusConflict, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
   hasCompletedCheckIn, planCreditReportAccounts, syncStatementAccount
 } from './finance-core.js';
+import {
+  applyUpdateStatus, createUpdateUiState, dismissUpdateNotification as dismissUpdateUiNotification,
+  setInstalledVersion, updateUiView
+} from './update-ui.js';
 
 let state;
 let encryption;
@@ -17,6 +21,7 @@ let freshStartToken = null;
 let restoreToken = null;
 let restoreInProgress = false;
 let restoreCanCancel = true;
+let updateUiState = createUpdateUiState();
 let normalEventsBound = false;
 let recoveryEventsBound = false;
 let restoreEventsBound = false;
@@ -54,8 +59,8 @@ async function initialise() {
 }
 
 function renderAppVersion(value) {
-  const version = String(value || '').trim().replace(/^v/i, '');
-  byId('appVersion').textContent = version ? `v${version}` : 'Version unavailable';
+  updateUiState = setInstalledVersion(updateUiState, value);
+  renderUpdateUi();
 }
 
 function activateNormalMode(loaded) {
@@ -297,11 +302,13 @@ function bindEvents() {
   byId('createBackupButton').addEventListener('click', createBackup);
   byId('restoreBackupButton').addEventListener('click', restoreBackup);
   byId('checkUpdateButton').addEventListener('click', checkForUpdates);
-  byId('installUpdateButton').addEventListener('click', installUpdate);
+  byId('dismissUpdateNotificationButton').addEventListener('click', dismissUpdateNotification);
+  document.querySelectorAll('[data-view-update]').forEach((button) => button.addEventListener('click', openAvailableUpdate));
   byId('reviewDiagnosticsButton').addEventListener('click', reviewDiagnostics);
   byId('exportDiagnosticsButton').addEventListener('click', exportDiagnostics);
   byId('deleteDiagnosticsButton').addEventListener('click', deleteDiagnostics);
   window.financeAPI.onUpdateStatus(handleUpdateStatus);
+  window.financeAPI.getUpdateStatus().then(handleUpdateStatus).catch(() => {});
 }
 
 function bindRestoreEvents() {
@@ -1142,20 +1149,38 @@ function showRestoreOutcome(title, explanation) {
 async function checkForUpdates() {
   byId('updateStatus').textContent = 'Checking for updates…';
   try { handleUpdateStatus(await window.financeAPI.checkForUpdates()); }
-  catch (error) { handleUpdateStatus({ state: 'error', message: error.message }); }
+  catch { handleUpdateStatus({ state: 'unavailable', message: 'The update check couldn’t be completed.' }); }
 }
 
-async function installUpdate() {
-  byId('installUpdateButton').disabled = true;
-  byId('updateStatus').textContent = 'Creating a recovery backup, then restarting…';
-  try { await window.financeAPI.installUpdate(); }
-  catch (error) { byId('installUpdateButton').disabled = false; handleUpdateStatus({ state: 'error', message: error.message }); }
+async function openAvailableUpdate() {
+  try {
+    await window.financeAPI.openAvailableUpdate();
+  } catch {
+    byId('updateStatus').textContent = 'The trusted update page couldn’t be opened. Try again in a moment.';
+  }
 }
 
 function handleUpdateStatus(status = {}) {
-  byId('updateStatus').textContent = status.message || 'Update status unavailable.';
-  byId('installUpdateButton').hidden = status.state !== 'ready';
-  byId('checkUpdateButton').disabled = ['checking', 'downloading'].includes(status.state);
+  updateUiState = applyUpdateStatus(updateUiState, status);
+  renderUpdateUi();
+}
+
+function dismissUpdateNotification() {
+  updateUiState = dismissUpdateUiNotification(updateUiState);
+  renderUpdateUi();
+}
+
+function renderUpdateUi() {
+  const view = updateUiView(updateUiState);
+  const version = byId('appVersion');
+  version.textContent = view.versionLabel;
+  version.setAttribute('aria-label', view.versionAriaLabel);
+  byId('updateStatus').textContent = view.settingsStatus;
+  byId('checkUpdateButton').disabled = view.checkDisabled;
+  document.querySelectorAll('[data-view-update]').forEach((button) => { button.hidden = !view.viewUpdateVisible; });
+  byId('updateNotificationMessage').textContent = view.notificationMessage;
+  byId('updateNotificationRegion').hidden = !view.notificationVisible;
+  byId('appShell').classList.toggle('update-notification-visible', view.notificationVisible);
 }
 
 async function reviewDiagnostics() {

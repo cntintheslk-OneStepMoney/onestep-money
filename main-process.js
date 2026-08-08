@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, shell } from 'electron';
 import updater from 'electron-updater';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -9,6 +9,7 @@ import { DiagnosticLogger, RENDERER_FAULT_EVENTS } from './diagnostic-logger.js'
 import { extractPdfDocument } from './pdf-service.js';
 import { parseImportedDocument } from './document-import.js';
 import { askLocalModel, checkLocalModel } from './local-llm-service.js';
+import { SafeUpdateService } from './update-service.js';
 
 const { autoUpdater } = updater;
 
@@ -20,6 +21,7 @@ let currentState;
 let currentLoadResult;
 let diagnostics;
 let diagnosticPreviewCache;
+let updateService;
 const pendingRestoreSelections = new Map();
 let activeRestore = null;
 
@@ -101,22 +103,18 @@ function createWindow() {
 }
 
 function configureAutoUpdater() {
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = false;
-  autoUpdater.on('checking-for-update', () => sendUpdateStatus({ state: 'checking', message: 'Checking for updates…' }));
-  autoUpdater.on('update-available', (info) => sendUpdateStatus({ state: 'downloading', version: info.version, message: `Version ${info.version} is downloading…` }));
-  autoUpdater.on('update-not-available', () => sendUpdateStatus({ state: 'current', message: 'You have the latest version.' }));
-  autoUpdater.on('download-progress', (progress) => sendUpdateStatus({ state: 'downloading', percent: Math.round(progress.percent || 0), message: `Downloading update… ${Math.round(progress.percent || 0)}%` }));
-  autoUpdater.on('update-downloaded', (info) => sendUpdateStatus({ state: 'ready', version: info.version, message: `Version ${info.version} is ready to install.` }));
-  autoUpdater.on('error', (error) => {
-    diagnostics.record('UPDATE_FAILED', { error }).catch(() => {});
-    sendUpdateStatus({ state: 'error', message: 'The update check failed. You can try again from Settings.' });
+  updateService = new SafeUpdateService({
+    autoUpdater,
+    isPackaged: app.isPackaged,
+    getCurrentVersion: () => app.getVersion(),
+    sendStatus: sendUpdateStatus,
+    recordFailure: (error) => diagnostics.record('UPDATE_FAILED', { error }),
+    openExternal: (url) => shell.openExternal(url)
   });
+  updateService.configure();
 
   mainWindow.webContents.once('did-finish-load', () => {
-    sendUpdateStatus({ state: app.isPackaged ? 'idle' : 'development', version: app.getVersion(), message: app.isPackaged ? 'Updates are checked automatically.' : 'Updates are disabled in development mode.' });
-    if (app.isPackaged) setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 4000);
+    updateService.scheduleAutomaticCheck();
   });
 }
 
@@ -352,17 +350,11 @@ function registerIpcHandlers() {
     return blocked || askLocalModel(question, currentState, currentState.settings.llmModel);
   });
   ipcMain.handle('update:check', async () => {
-    if (!app.isPackaged) return { state: 'development', message: 'Updates are disabled in development mode.', currentVersion: app.getVersion() };
-    await autoUpdater.checkForUpdates();
-    return { state: 'checking', message: 'Checking for updates…', currentVersion: app.getVersion() };
+    return updateService.check({ manual: true });
   });
-  ipcMain.handle('update:install', async () => {
-    const blocked = blockedMutationResult();
-    if (blocked) return blocked;
-    if (!app.isPackaged) return false;
-    await store.createAutomaticBackup('before-update');
-    setImmediate(() => autoUpdater.quitAndInstall(false, true));
-    return true;
+  ipcMain.handle('update:get-status', () => updateService.getStatus());
+  ipcMain.handle('update:open-release', async () => {
+    return updateService.openAvailableRelease();
   });
 
   ipcMain.handle('export:csv', async (_event, csv) => {
