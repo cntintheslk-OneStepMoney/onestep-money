@@ -328,6 +328,7 @@ h3 { margin-bottom: 0.25rem; font-size: 0.98rem; letter-spacing: -0.012em; }
 .focus-panel.is-completing { pointer-events: none; animation: focusComplete 360ms cubic-bezier(0.45, 0, 0.85, 0.4) forwards; }
 .focus-panel.is-switching { pointer-events: none; animation: focusSwitchOut 180ms ease-in forwards; }
 .focus-panel.is-arriving { animation: focusSwitchIn 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.focus-panel.is-blocked { animation: attentionNudge 420ms ease both; }
 .daily-complete {
   min-height: 82px;
   display: flex;
@@ -550,6 +551,7 @@ tr:last-child td { border-bottom: 0; }
 @keyframes focusSwitchOut { to { opacity: 0; transform: translateY(-5px); } }
 @keyframes focusSwitchIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes completionIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes attentionNudge { 0%, 100% { transform: translateX(0); } 28% { transform: translateX(-5px); } 58% { transform: translateX(4px); } 80% { transform: translateX(-2px); } }
 
 @media (max-width: 1120px) {
   .app-shell { grid-template-columns: 86px minmax(0, 1fr); }

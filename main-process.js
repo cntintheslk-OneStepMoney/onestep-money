@@ -46,7 +46,7 @@ function createWindow() {
     height: 940,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#061a38',
     show: !process.argv.includes('--capture-ui'),
     webPreferences: {
       preload: path.join(__dirname, 'preload-bridge.cjs'),

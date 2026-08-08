@@ -11,7 +11,8 @@ const publicFiles = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/renderer-app.js', ['renderer-app.js', 'text/javascript; charset=utf-8']],
   ['/finance-core.js', ['finance-core.js', 'text/javascript; charset=utf-8']],
-  ['/assets/onestep-money-icon.png', ['assets/onestep-money-icon.png', 'image/png']]
+  ['/assets/onestep-money-icon.png', ['assets/onestep-money-icon.png', 'image/png']],
+  ['/assets/onestep-money-wordmark.png', ['assets/onestep-money-wordmark.png', 'image/png']]
 ]);
 
 http.createServer(async (request, response) => {

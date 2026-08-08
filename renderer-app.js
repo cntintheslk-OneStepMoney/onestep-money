@@ -533,6 +533,17 @@ function creditPlanLabel(item) {
 
 async function completeNextAction() {
   if (hasCompletedCheckIn(state.checkIns)) return;
+  const blocker = actionCompletionBlocker(pendingAction);
+  if (blocker) {
+    byId('nextActionDetail').textContent = blocker;
+    const panel = document.querySelector('.focus-panel');
+    panel.classList.remove('is-blocked');
+    void panel.offsetWidth;
+    panel.classList.add('is-blocked');
+    window.setTimeout(() => panel.classList.remove('is-blocked'), 460);
+    showToast('This action is still open. Complete it, or use the five-minute check-in below.');
+    return;
+  }
   const task = state.tasks.find((item) => item.id === pendingAction.id);
   if (task) task.completedAt = new Date().toISOString();
   state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: pendingAction.id, note: pendingAction.title });
@@ -540,6 +551,12 @@ async function completeNextAction() {
   await animateFocusPanel('is-completing', 360);
   render();
   showToast('Today is complete. You can close the app now.');
+}
+
+function actionCompletionBlocker(action) {
+  if (action.id === 'generated-first-account' && !state.accounts.length) return 'This step is still open: add an account in Settings first. If you only reviewed your money today, use the five-minute check-in below instead.';
+  if (action.id === 'generated-first-import' && !state.transactions.length) return 'This step is still open: import and confirm at least one payment first. If you only reviewed your money today, use the five-minute check-in below instead.';
+  return '';
 }
 
 async function snoozeNextAction() {
