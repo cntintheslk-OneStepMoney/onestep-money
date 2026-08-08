@@ -1,9 +1,10 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  creditReportDebtStatus, creditReportStatusConflict, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
-  hasCompletedCheckIn, planCreditReportAccounts, syncStatementAccount
+  creditReportDebtStatus, creditReportStatusConflict, findSavingsOpportunities, formatCurrency, formatDate,
+  hasCompletedCheckIn, planCreditReportAccounts
 } from './finance-core.js';
+import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
 import {
   applyUpdateStatus, createUpdateUiState, dismissUpdateNotification as dismissUpdateUiNotification,
   setInstalledVersion, updateUiView
@@ -637,6 +638,8 @@ function showNextImport() {
   const preview = currentImport.preview;
   byId('importTitle').textContent = currentImport.document.originalName;
   const summary = byId('importSummary'); clear(summary);
+  clear(byId('importChanges'));
+  byId('importChanges').hidden = true;
   if (preview.kind === 'credit-report') {
     const report = preview.records[0];
     currentImport.creditPlan = report ? creditReportAdditionPlan(report) : [];
@@ -647,13 +650,25 @@ function showNextImport() {
   } else if (preview.kind === 'payslip') {
     append(summary, summaryTile('Period', monthLabel(preview.summary.period)), summaryTile('Gross', formatCurrency(preview.summary.gross)), summaryTile('Deductions', formatCurrency(preview.summary.deductions)), summaryTile('Net', formatCurrency(preview.summary.net)));
   } else {
-    append(summary, summaryTile('Records', preview.records.length), summaryTile('Money in', formatCurrency(preview.summary.incoming)), summaryTile('Money out', formatCurrency(preview.summary.outgoing)), summaryTile('Reconciled', preview.reconciled ? 'Yes' : 'Needs review'));
+    currentImport.statementPlan = buildStatementImportPlan(state, preview, currentImport.document.id);
+    const plan = currentImport.statementPlan;
+    const accountName = plan.accountMatch.account?.name || 'Needs confirmation';
+    const balanceLabel = statementBalancePlanLabel(plan.balance);
+    append(summary,
+      summaryTile('Account', accountName),
+      summaryTile('New', plan.counts.new),
+      summaryTile('Already known', plan.counts.alreadyKnown),
+      summaryTile('Needs review', plan.counts.needsReview),
+      summaryTile('Reconciliation', preview.reconciled ? 'Reconciled' : 'Balance protected'),
+      summaryTile('Account balance', balanceLabel)
+    );
+    renderStatementChanges(plan);
   }
   const warning = byId('importWarnings');
-  const messages = [...preview.warnings, ...preview.rejected.map((item) => `Row ${item.row || '—'}: ${item.reason}`)];
+  const messages = [...(currentImport.statementPlan?.warnings || preview.warnings), ...preview.rejected.map((item) => `Row ${item.row || '—'}: ${item.reason}`)];
   warning.hidden = !messages.length; warning.textContent = messages.join('\n');
   renderImportPreview(preview);
-  byId('confirmImportButton').disabled = !preview.records.length;
+  byId('confirmImportButton').disabled = preview.kind === 'statement' ? !currentImport.statementPlan.canApply : !preview.records.length;
   byId('confirmImportButton').textContent = preview.kind === 'credit-report' ? 'Save report and sync debts' : 'Import reviewed records';
   byId('importDialog').showModal();
 }
@@ -663,7 +678,7 @@ function renderImportPreview(preview) {
   const headerRow = document.createElement('tr');
   const headers = preview.kind === 'credit-report'
     ? ['Lender', 'Type', 'Balance', 'Limit', 'Action']
-    : preview.kind === 'payslip' ? ['Period', 'Gross', 'Deductions', 'Net'] : ['Date', 'Description', 'Incoming', 'Outgoing', 'Balance'];
+    : preview.kind === 'payslip' ? ['Period', 'Gross', 'Deductions', 'Net'] : ['Date', 'Description', 'Incoming', 'Outgoing', 'Balance', 'Action'];
   headers.forEach((label) => headerRow.append(element('th', '', label))); head.append(headerRow);
   if (preview.kind === 'credit-report') {
     const plan = currentImport?.creditPlan || [];
@@ -681,7 +696,10 @@ function renderImportPreview(preview) {
   for (const record of preview.records.slice(0, 100)) {
     const row = document.createElement('tr');
     if (preview.kind === 'payslip') append(row, cell(monthLabel(record.period)), amountCell(record.grossPay), amountCell(record.totalDeductions), amountCell(record.netPay));
-    else append(row, cell(formatDate(record.date)), cell(record.description), amountCell(record.incoming, 'incoming'), amountCell(record.outgoing, 'outgoing'), amountCell(record.runningBalance));
+    else {
+      const recordPlan = currentImport?.statementPlan?.recordPlans.find((item) => item.record.id === record.id) || { action: 'add' };
+      append(row, cell(formatDate(record.date)), cell(record.description), amountCell(record.incoming, 'incoming'), amountCell(record.outgoing, 'outgoing'), amountCell(record.runningBalance), cell(statementRecordActionLabel(recordPlan)));
+    }
     body.append(row);
   }
 }
@@ -700,19 +718,16 @@ async function confirmCurrentImport(event) {
   } else if (preview.kind === 'payslip') {
     for (const record of preview.records) if (!state.payslips.some((item) => item.id === record.id)) state.payslips.push(record);
   } else {
-    const duplicates = findDuplicateCandidates(state.transactions, preview.records);
-    const exactIds = new Set(duplicates.exact.map((item) => item.incoming.id));
-    const possibleIds = new Set(duplicates.possible.map((item) => item.incoming.id));
-    state.transactions.push(...preview.records.filter((item) => !exactIds.has(item.id)).map((item) => ({ ...item, duplicateStatus: possibleIds.has(item.id) ? 'possible' : 'none' })));
-    const account = state.accounts.find((item) => item.id === preview.accountHint);
-    if (account) {
-      const overdraftSync = syncStatementAccount(state, account, preview, currentImport.document.id);
-      completionMessage = overdraftSync === 'overdraft-created'
-        ? 'Statement imported. Account balance updated and its overdraft added.'
-        : overdraftSync === 'overdraft-updated' ? 'Statement imported. Account and overdraft balances updated.'
-          : overdraftSync === 'account-updated' ? 'Statement imported and account balance updated.' : completionMessage;
-    }
-    if (exactIds.size) showToast(`${exactIds.size} exact duplicate${exactIds.size === 1 ? '' : 's'} skipped.`);
+    const applied = applyStatementImportPlan(state, preview, currentImport.statementPlan, currentImport.document.id);
+    await saveState(applied.state);
+    const result = applied.result;
+    completionMessage = statementCompletionMessage(result);
+    currentImport = null;
+    byId('importDialog').close('confirmed');
+    render();
+    showToast(completionMessage);
+    showNextImport();
+    return;
   }
   const recordCount = preview.kind === 'credit-report' ? (preview.records[0]?.accounts || []).length : preview.records.length;
   const stateDocument = state.documents.find((document) => document.id === currentImport.document.id);
@@ -724,6 +739,51 @@ async function confirmCurrentImport(event) {
   render();
   showToast(completionMessage);
   showNextImport();
+}
+
+function renderStatementChanges(plan) {
+  const container = byId('importChanges');
+  clear(container);
+  const changes = [
+    ['ADD', `${plan.counts.add} new transaction${plan.counts.add === 1 ? '' : 's'}`],
+    ['ALREADY KNOWN', `${plan.counts.alreadyKnown} overlapping transaction${plan.counts.alreadyKnown === 1 ? '' : 's'}`],
+    ['RECONCILE', statementBalancePlanLabel(plan.balance)],
+    ['REVIEW', `${plan.counts.needsReview} possible duplicate${plan.counts.needsReview === 1 ? '' : 's'} · ${plan.counts.recurring} recurring observation${plan.counts.recurring === 1 ? '' : 's'}`]
+  ];
+  for (const [label, value] of changes) {
+    const item = element('div', 'import-change');
+    append(item, element('strong', '', label), element('span', '', value));
+    container.append(item);
+  }
+  container.hidden = false;
+}
+
+function statementBalancePlanLabel(balance) {
+  if (balance.action === 'update') {
+    const current = balance.currentBalance !== null && balance.currentBalance !== undefined && Number.isFinite(Number(balance.currentBalance)) ? formatCurrency(balance.currentBalance) : 'Unknown';
+    return `${current} → ${formatCurrency(balance.closingBalance)}`;
+  }
+  if (balance.action === 'historical-only') return 'Keep newer balance';
+  if (balance.action === 'needs-review') return 'Account needs confirmation';
+  return 'No balance update';
+}
+
+function statementRecordActionLabel(plan) {
+  if (plan.action === 'already-known') return 'Already known';
+  if (plan.action === 'needs-review') return 'Needs review · possible duplicate';
+  if (plan.transfer) return `Add · ${plan.transfer.confidence} internal transfer`;
+  if (plan.recurring) return `Add · ${plan.recurring.confidence} ${plan.recurring.cadence} pattern`;
+  return 'Add';
+}
+
+function statementCompletionMessage(result) {
+  const balance = result.balanceAction === 'overdraft-created'
+    ? ' Account balance updated and its overdraft added.'
+    : result.balanceAction === 'overdraft-updated' ? ' Account and overdraft balances updated.'
+      : result.balanceAction === 'account-updated' ? ' Account balance updated.'
+        : result.balanceAction === 'historical-only' ? ' The newer account balance was preserved.' : ' The account balance was protected.';
+  const known = result.alreadyKnown ? ` ${result.alreadyKnown} already-known transaction${result.alreadyKnown === 1 ? '' : 's'} skipped.` : '';
+  return `Statement imported. ${result.added} new transaction${result.added === 1 ? '' : 's'} added.${known}${balance}`;
 }
 
 async function handleImportDialogClosed() {
@@ -1268,9 +1328,9 @@ async function deleteDiagnostics() {
 }
 
 async function saveAndRender() { await saveState(); render(); }
-async function saveState() {
-  synchroniseSelectedMonth();
-  const saved = await window.financeAPI.saveState(state);
+async function saveState(nextState = state) {
+  synchroniseSelectedMonth(nextState);
+  const saved = await window.financeAPI.saveState(nextState);
   if (saved?.status === 'blocked') throw new Error(saved.message || 'Saving is paused while recovery is required.');
   state = saved;
 }
@@ -1282,9 +1342,9 @@ function populateMonthOptions() {
   select.value = state.settings.selectedMonth;
 }
 
-function synchroniseSelectedMonth() {
-  const months = availableReportingMonths(state);
-  if (!months.includes(state.settings.selectedMonth)) state.settings.selectedMonth = months[0];
+function synchroniseSelectedMonth(targetState = state) {
+  const months = availableReportingMonths(targetState);
+  if (!months.includes(targetState.settings.selectedMonth)) targetState.settings.selectedMonth = months[0];
   return months;
 }
 

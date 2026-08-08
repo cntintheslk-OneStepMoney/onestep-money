@@ -454,7 +454,7 @@ function canonicalDocumentName(document, preview, accountId, state) {
     ? record?.payDate || `${record?.period || new Date().toISOString().slice(0, 7)}-01`
     : preview.kind === 'credit-report'
       ? record?.reportDate || new Date().toISOString().slice(0, 10)
-      : [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
+      : preview.summary?.statementEndDate || [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
   const type = preview.kind === 'payslip' ? 'payslip' : preview.kind === 'credit-report' ? 'credit-report' : 'bank-statement';
   const provider = preview.kind === 'payslip'
     ? 'jpa'

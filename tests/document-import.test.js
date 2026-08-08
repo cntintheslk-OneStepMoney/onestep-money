@@ -13,6 +13,16 @@ test('CSV with separate debit and credit columns keeps a positive BACS credit as
 test('signed amount CSV distinguishes incoming and outgoing', () => {
   const result = parseCsvStatement('Date,Description,Amount\n01/02/2025,Refund,12.50\n02/02/2025,Purchase,-4.25', 'signed.csv', 'acct-1');
   assert.deepEqual(result.records.map((item) => [item.incoming, item.outgoing]), [[12.5, 0], [0, 4.25]]);
+  assert.equal(result.reconciled, false);
+  assert.match(result.warnings[0], /will not update the account balance/i);
+});
+
+test('explicit CSV opening and closing balances can reconcile without running-balance rows', () => {
+  const csv = 'Opening balance: £100.00\nClosing balance: £112.50\nDate,Description,Amount\n01/02/2025,Purchase,-12.50\n02/02/2025,Refund,25.00';
+  const result = parseCsvStatement(csv, 'labelled-balances.csv', 'acct-1');
+  assert.equal(result.summary.openingBalance, 100);
+  assert.equal(result.summary.closingBalance, 112.5);
+  assert.equal(result.reconciled, true);
 });
 
 test('semicolon exports can contain a preamble and common UK bank headings', () => {
@@ -36,6 +46,14 @@ test('specific description and amount headings win over generic metadata columns
   const result = parseCsvStatement(csv, 'metadata-columns.csv', 'acct-1');
   assert.equal(result.records[0].description, 'Example Purchase');
   assert.equal(result.records[0].outgoing, 4.25);
+});
+
+test('transaction, posting and value dates remain distinct when a bank exports all three', () => {
+  const csv = 'Transaction Date,Posting Date,Value Date,Description,Amount,Balance\n01/08/2026,02/08/2026,03/08/2026,Example payment,-10.00,90.00';
+  const result = parseCsvStatement(csv, 'multiple-dates.csv', 'acct-1');
+  assert.equal(result.records[0].date, '2026-08-01');
+  assert.equal(result.records[0].postingDate, '2026-08-02');
+  assert.equal(result.records[0].valueDate, '2026-08-03');
 });
 
 test('descending statement exports expose the latest reconciled balance for account sync', () => {
@@ -64,6 +82,17 @@ test('OFX parser supports common unclosed SGML tags', () => {
   assert.equal(result.records.length, 1);
   assert.equal(result.records[0].date, '2025-02-01');
   assert.equal(result.records[0].outgoing, 9.99);
+  assert.equal(result.records[0].providerTransactionId, 'ABC1');
+});
+
+test('OFX statement identity preserves safe account, period and currency metadata', () => {
+  const ofx = '<CURDEF>GBP<BANKACCTFROM><BANKID>EXAMPLE<ACCTID>001122334455<ACCTTYPE>CHECKING</BANKACCTFROM><BANKTRANLIST><DTSTART>20260701000000<DTEND>20260731235959<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260715<TRNAMT>-10.00<FITID>FIT-1<NAME>Example</STMTTRN></BANKTRANLIST>';
+  const result = parseOfxStatement(ofx, 'statement.ofx', 'acct-1');
+  assert.equal(result.accountIdentity.accountReference, '••••4455');
+  assert.equal(result.accountIdentity.currency, 'GBP');
+  assert.equal(result.period.startDate, '2026-07-01');
+  assert.equal(result.period.endDate, '2026-07-31');
+  assert.equal(result.period.source, 'explicit');
 });
 
 test('QFX files use the OFX transaction parser', () => {
@@ -92,6 +121,73 @@ test('labelled PDF tables use the conservative generic fallback and reconcile', 
   assert.equal(result.records[0].outgoing, 12.5);
   assert.equal(result.records[1].incoming, 25);
   assert.equal(result.reconciled, true);
+});
+
+test('explicit PDF statement period and account identity override transaction-derived dates', () => {
+  const item = (text, x) => ({ text, x, width: text.length * 5, y: 0, height: 10 });
+  const line = (items) => ({ items, text: items.map((entry) => entry.text).join(' ') });
+  const document = {
+    text: 'Example Bank\nAccount number: 001122334455\nAccount type: Current account\nStatement period: 1 July 2026 to 31 July 2026\nCurrency: GBP\nOpening balance £100.00\nClosing balance £90.00',
+    pages: [{ width: 600, lines: [
+      line([item('Date', 10), item('Description', 100), item('Money Out', 350), item('Money In', 430), item('Balance', 510)]),
+      line([item('15 July 2026', 10), item('Example payment', 100), item('10.00', 350), item('90.00', 510)])
+    ] }]
+  };
+  const result = parsePdfStatement(document, 'explicit-period.pdf', 'acct-1');
+  assert.equal(result.period.startDate, '2026-07-01');
+  assert.equal(result.period.endDate, '2026-07-31');
+  assert.equal(result.period.source, 'explicit');
+  assert.equal(result.accountIdentity.accountReference, '••••4455');
+  assert.equal(result.accountIdentity.accountType, 'Current account');
+  assert.equal(result.accountIdentity.currency, 'GBP');
+});
+
+test('explicit closing balance is not overwritten by a plausible running balance', () => {
+  const item = (text, x) => ({ text, x, width: text.length * 5, y: 0, height: 10 });
+  const line = (items) => ({ items, text: items.map((entry) => entry.text).join(' ') });
+  const document = {
+    text: 'Opening balance £100.00\nClosing balance £95.00',
+    pages: [{ width: 600, lines: [
+      line([item('Date', 10), item('Description', 100), item('Money Out', 350), item('Money In', 430), item('Balance', 510)]),
+      line([item('15 July 2026', 10), item('Example payment', 100), item('10.00', 350), item('90.00', 510)])
+    ] }]
+  };
+  const result = parsePdfStatement(document, 'conflicting-balance.pdf', 'acct-1');
+  assert.equal(result.summary.closingBalance, 95);
+  assert.equal(result.summary.reconciliationDifference, -5);
+  assert.equal(result.reconciled, false);
+  assert.match(result.warnings.join(' '), /£5\.00/);
+});
+
+test('available funds are not confused with closing balance or arranged overdraft limit', () => {
+  const item = (text, x) => ({ text, x, width: text.length * 5, y: 0, height: 10 });
+  const line = (items) => ({ items, text: items.map((entry) => entry.text).join(' ') });
+  const document = {
+    text: 'Opening balance £0.00\nClosing balance -£300.00\nArranged overdraft: £1,000.00\nAvailable funds: £700.00',
+    pages: [{ width: 600, lines: [
+      line([item('Date', 10), item('Description', 100), item('Money Out', 350), item('Money In', 430), item('Balance', 510)]),
+      line([item('15 July 2026', 10), item('Example payment', 100), item('300.00', 350), item('-300.00', 510)])
+    ] }]
+  };
+  const result = parsePdfStatement(document, 'overdraft.pdf', 'acct-1');
+  assert.equal(result.summary.closingBalance, -300);
+  assert.equal(result.summary.overdraftLimit, 1000);
+  assert.equal(result.reconciled, true);
+});
+
+test('malformed monetary values are rejected rather than converted to zero', () => {
+  const result = parseCsvStatement('Date,Description,Amount\n01/08/2026,Malformed,£12..50', 'invalid-amount.csv', 'acct-1');
+  assert.equal(result.records.length, 0);
+  assert.match(result.rejected[0].reason, /amount/i);
+});
+
+test('fees and interest preserve their direction and distinct classification', () => {
+  const result = parseCsvStatement('Date,Description,Amount,Balance\n01/08/2026,Overdraft fee,-5.00,-5.00\n02/08/2026,Interest received,1.25,-3.75', 'charges.csv', 'acct-1');
+  assert.equal(result.records[0].category, 'Bank fees');
+  assert.equal(result.records[0].transactionType, 'fee');
+  assert.equal(result.records[1].category, 'Interest received');
+  assert.equal(result.records[1].transactionType, 'interest');
+  assert.equal(result.records[1].incoming, 1.25);
 });
 
 test('Lloyds-branded PDFs reuse the reconciled LBG statement layout', () => {
