@@ -42,10 +42,15 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   await exposed.api.saveState({ ok: true });
   await exposed.api.retryRecovery();
   await exposed.api.restoreRecoveryBackup('backup-id');
+  await exposed.api.selectRecoveryPortableBackup('backup-password');
   await exposed.api.requestFreshStart();
   await exposed.api.cancelFreshStart('confirmation-token');
   await exposed.api.confirmFreshStart('confirmation-token');
   await exposed.api.importFiles({ kind: 'statement' });
+  await exposed.api.createBackup('backup-password');
+  await exposed.api.selectRestoreBackup('backup-password');
+  await exposed.api.restoreBackup('restore-token');
+  await exposed.api.cancelRestoreBackup('restore-token');
   await exposed.api.previewDiagnostics();
   await exposed.api.exportDiagnostics('preview-token');
   await exposed.api.deleteDiagnostics();
@@ -56,10 +61,15 @@ test('sandboxed preload exposes the complete desktop API', async () => {
     ['state:save', { ok: true }],
     ['recovery:retry'],
     ['recovery:restore-backup', 'backup-id'],
+    ['recovery:select-portable-backup', 'backup-password'],
     ['recovery:fresh-start:request'],
     ['recovery:fresh-start:cancel', 'confirmation-token'],
     ['recovery:fresh-start:confirm', 'confirmation-token'],
     ['import:choose', { kind: 'statement' }],
+    ['backup:create', 'backup-password'],
+    ['backup:select-restore', 'backup-password'],
+    ['backup:restore', 'restore-token'],
+    ['backup:restore-cancel', 'restore-token'],
     ['diagnostics:preview'],
     ['diagnostics:export', 'preview-token'],
     ['diagnostics:delete'],
@@ -73,4 +83,11 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   assert.deepEqual(updateStatus, { state: 'ready' });
   unsubscribe();
   assert.equal(listeners.has('update:status'), false);
+
+  let restoreProgress;
+  const unsubscribeRestore = exposed.api.onRestoreProgress((status) => { restoreProgress = status; });
+  listeners.get('backup:restore-progress')({}, { stage: 'verifying_restored_data', canCancel: false });
+  assert.deepEqual(restoreProgress, { stage: 'verifying_restored_data', canCancel: false });
+  unsubscribeRestore();
+  assert.equal(listeners.has('backup:restore-progress'), false);
 });

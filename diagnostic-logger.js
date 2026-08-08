@@ -22,7 +22,7 @@ const EVENT_DEFINITIONS = Object.freeze({
   DOCUMENT_OPEN_FAILED: { level: 'error', reference: 'DOC-101', stage: 'document_open', layer: 'detail' },
   DOCUMENT_DELETE_FAILED: { level: 'error', reference: 'DOC-102', stage: 'document_delete', layer: 'detail' },
   BACKUP_CREATE_FAILED: { level: 'error', reference: 'BAK-101', stage: 'backup_create', layer: 'detail' },
-  BACKUP_RESTORE_FAILED: { level: 'error', reference: 'BAK-102', stage: 'backup_restore', layer: 'detail' },
+  BACKUP_RESTORE_FAILED: { level: 'error', reference: 'BAK-102', stage: 'backup_restore', layer: 'detail', fields: ['reasonCode'] },
   UPDATE_FAILED: { level: 'error', reference: 'UPD-101', stage: 'update', layer: 'detail' },
   RENDERER_UNHANDLED_ERROR: { level: 'error', reference: 'UI-101', stage: 'renderer', layer: 'detail' },
   RENDERER_UNHANDLED_REJECTION: { level: 'error', reference: 'UI-102', stage: 'renderer', layer: 'detail' },
@@ -45,7 +45,9 @@ const ALLOWED_FILE_TYPES = new Set(['pdf', 'csv', 'qif', 'ofx', 'json']);
 const ALLOWED_REASON_CODES = new Set([
   'state_not_found', 'read_failure', 'decryption_failure', 'encryption_key_unavailable',
   'invalid_content', 'schema_validation_failure', 'migration_failure', 'unknown_storage_failure',
-  'backup_discovery_failed', 'restore_failed', 'fresh_start_failed'
+  'backup_discovery_failed', 'restore_failed', 'fresh_start_failed', 'restore_cancelled',
+  'restore_interrupted', 'restore_journal_invalid', 'restore_interrupted_unresolved',
+  'restore_cleanup_failed', 'restore_rollback_failed'
 ]);
 const ALLOWED_ERROR_NAMES = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError', 'URIError', 'AggregateError']);
 const ALLOWED_CLASSIFICATIONS = new Set(['PDF_RENDER_DOMMATRIX_MISSING', 'PDF_RENDER_DOMPOINT_MISSING', 'DOCUMENT_FORMAT_UNSUPPORTED', 'FILE_DAMAGED', 'STORAGE_FULL', 'PERMISSION_DENIED', 'SECURE_STORAGE_UNAVAILABLE', 'UNCLASSIFIED_FAILURE']);
