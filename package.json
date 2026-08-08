@@ -1,6 +1,6 @@
 {
   "name": "onestep-money",
-  "version": "2.1.13",
+  "version": "2.1.14",
   "description": "A local-first, ADHD-friendly UK finance and debt companion built around one clear move at a time.",
   "private": true,
   "type": "module",
@@ -52,6 +52,7 @@
       "pdf-service.js",
       "preload-bridge.cjs",
       "renderer-app.js",
+      "credit-report-intelligence.js",
       "statement-intelligence.js",
       "seed-data.json",
       "styles.css",
