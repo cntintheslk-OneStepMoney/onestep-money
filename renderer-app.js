@@ -1,5 +1,5 @@
 import {
-  buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
+  availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
   findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate
 } from './finance-core.js';
@@ -93,6 +93,7 @@ function selectView(name) {
 }
 
 function render() {
+  populateMonthOptions();
   const month = state.settings.selectedMonth;
   const summary = calculatePeriodSummary(state, month);
   pendingAction = buildNextAction(state);
@@ -641,13 +642,22 @@ async function deleteDiagnostics() {
 }
 
 async function saveAndRender() { await saveState(); render(); }
-async function saveState() { state = await window.financeAPI.saveState(state); }
+async function saveState() {
+  synchroniseSelectedMonth();
+  state = await window.financeAPI.saveState(state);
+}
 
 function populateMonthOptions() {
-  const months = [...new Set([...state.transactions.map((item) => String(item.budgetMonth || item.date).slice(0, 7)), ...state.payslips.map((item) => item.period), state.settings.selectedMonth].filter(Boolean))].sort().reverse();
+  const months = synchroniseSelectedMonth();
   const select = byId('monthSelect'); clear(select);
   for (const month of months) { const option = document.createElement('option'); option.value = month; option.textContent = monthLabel(month); select.append(option); }
   select.value = state.settings.selectedMonth;
+}
+
+function synchroniseSelectedMonth() {
+  const months = availableReportingMonths(state);
+  if (!months.includes(state.settings.selectedMonth)) state.settings.selectedMonth = months[0];
+  return months;
 }
 
 function populateAccountOptions() {
