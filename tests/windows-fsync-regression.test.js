@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const seedPath = new URL('../seed-data.json', import.meta.url);
 
-test('automatic backup does not fsync a read-only file handle', async (t) => {
+test('pre-import and pre-update backups do not fsync a read-only file handle', async (t) => {
   const originalOpen = fs.open;
   fs.open = async (target, flags, ...args) => {
     const handle = await originalOpen(target, flags, ...args);
@@ -40,8 +40,10 @@ test('automatic backup does not fsync a read-only file handle', async (t) => {
   const loaded = await store.loadState();
   assert.equal(loaded.status, 'normal');
 
-  const backupPath = await store.createAutomaticBackup('windows-fsync-regression');
-  assert.ok(backupPath);
-  const inspected = await store.validateLocalBackupSet(backupPath, { requireSemanticValidation: true });
-  assert.equal(inspected.valid, true);
+  for (const reason of ['before-import', 'before-update']) {
+    const backupPath = await store.createAutomaticBackup(reason);
+    assert.ok(backupPath, reason);
+    const inspected = await store.validateLocalBackupSet(backupPath, { requireSemanticValidation: true });
+    assert.equal(inspected.valid, true, reason);
+  }
 });
