@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -70,20 +70,34 @@ export function calculateBudgetRows(state, month = state.settings?.selectedMonth
 }
 
 export function buildNextAction(state, now = new Date()) {
-  const today = now.toISOString().slice(0, 10);
+  const today = localDateKey(now);
+  const isSnoozed = (id) => String(state.settings?.snoozedActions?.[id] || '') > today;
   const task = (state.tasks || [])
     .filter((entry) => !entry.completedAt && (!entry.snoozedUntil || entry.snoozedUntil <= today))
     .sort((left, right) => Number(left.order || 999) - Number(right.order || 999))[0];
   if (task) return task;
 
-  if (!(state.accounts || []).length) return { id: 'generated-first-account', title: 'Add your first account', detail: 'Open Settings, add one bank account, then stop. No balances need to be perfect yet.', timeframe: '5 min', stage: 'today' };
-  if (!(state.transactions || []).length) return { id: 'generated-first-import', title: 'Import one recent statement', detail: 'Choose one account and review the preview before accepting any payments.', timeframe: '10 min', stage: 'today' };
+  const checkIn = { id: 'generated-checkin', title: 'Complete a five-minute check-in', detail: 'Update one balance, then stop. Consistency matters more than perfection.', timeframe: '5 min', stage: 'today' };
+  if (!(state.accounts || []).length) {
+    const firstAccount = { id: 'generated-first-account', title: 'Add your first account', detail: 'Open Settings, add one bank account, then stop. No balances need to be perfect yet.', timeframe: '5 min', stage: 'today' };
+    return isSnoozed(firstAccount.id) ? checkIn : firstAccount;
+  }
+  if (!(state.transactions || []).length) {
+    const firstImport = { id: 'generated-first-import', title: 'Import one recent statement', detail: 'Choose one account and review the preview before accepting any payments.', timeframe: '10 min', stage: 'today' };
+    return isSnoozed(firstImport.id) ? checkIn : firstImport;
+  }
 
   const overLimit = (state.overdrafts || []).find((item) => item.status === 'over_limit');
-  if (overLimit) return { id: 'generated-overlimit', title: `Check ${overLimit.name}`, detail: 'Confirm the balance and ask about an affordable plan before making an extra debt payment.', timeframe: '10 min', stage: 'today' };
+  if (overLimit && !isSnoozed('generated-overlimit')) return { id: 'generated-overlimit', title: `Check ${overLimit.name}`, detail: 'Confirm the balance and ask about an affordable plan before making an extra debt payment.', timeframe: '10 min', stage: 'today' };
   const arrears = [...(state.overdrafts || []), ...(state.debts || [])].find((item) => ['arrears', 'defaulted'].includes(item.status));
-  if (arrears) return { id: 'generated-arrears', title: `Confirm the plan for ${arrears.name}`, detail: 'Record the agreed payment and whether interest or charges are frozen.', timeframe: '10 min', stage: 'this week' };
-  return { id: 'generated-checkin', title: 'Complete a five-minute check-in', detail: 'Update one balance, then stop. Consistency matters more than perfection.', timeframe: '5 min', stage: 'today' };
+  if (arrears && !isSnoozed('generated-arrears')) return { id: 'generated-arrears', title: `Confirm the plan for ${arrears.name}`, detail: 'Record the agreed payment and whether interest or charges are frozen.', timeframe: '10 min', stage: 'this week' };
+  if (!isSnoozed(checkIn.id)) return checkIn;
+  return { id: 'generated-paused', title: 'Nothing else needs your attention today', detail: 'Your available steps are snoozed. Come back tomorrow, or use another page if you choose to update something now.', timeframe: 'Done', stage: 'today', passive: true };
+}
+
+export function hasCompletedCheckIn(checkIns = [], now = new Date()) {
+  const today = localDateKey(now);
+  return checkIns.some((entry) => entry.completed !== false && localDateKey(new Date(entry.date)) === today);
 }
 
 export function calculateStreak(checkIns = [], now = new Date()) {
@@ -200,6 +214,76 @@ export function findDuplicateCandidates(existing, incoming) {
   return { exact, possible };
 }
 
+export function planCreditReportAccounts(debts = [], overdrafts = [], accounts = []) {
+  const usedMatches = new Set();
+  return accounts.map((account) => {
+    const balance = Number(account.currentBalance);
+    const kind = reportedAccountKind(account);
+    const collection = kind === 'overdraft' ? overdrafts : debts;
+    const existing = collection.find((item) => !usedMatches.has(item.id) && reportedAccountMatches(item, account));
+    if (existing) {
+      usedMatches.add(existing.id);
+      return { account, action: 'existing', kind, existingId: existing.id };
+    }
+    if (!Number.isFinite(balance) || balance <= 0) return { account, action: 'no-balance', kind };
+    return { account, action: kind === 'overdraft' ? 'add-overdraft' : 'add-debt', kind };
+  });
+}
+
+export function creditReportDebtStatus(value) {
+  const text = String(value || '').toLowerCase();
+  if (/default/.test(text)) return 'defaulted';
+  if (/over limit/.test(text)) return 'over_limit';
+  if (/arrears|late|missed|delinquent/.test(text)) return 'arrears';
+  return 'current';
+}
+
+export function syncStatementAccount(state, account, preview, documentId = '') {
+  const closingBalance = Number(preview?.summary?.closingBalance);
+  if (!account || !preview?.reconciled || !Number.isFinite(closingBalance)) return '';
+  account.currentBalance = closingBalance;
+  account.statementDate = (preview.records || []).map((item) => item.date).filter(Boolean).sort().at(-1) || account.statementDate;
+  if (!Number.isFinite(account.openingBalance) && Number.isFinite(preview.summary.openingBalance)) account.openingBalance = preview.summary.openingBalance;
+  if (!account.institution && preview.institution) account.institution = preview.institution;
+
+  const used = Math.max(0, -closingBalance);
+  let overdraft = (state.overdrafts || []).find((item) => item.accountId === account.id);
+  if (!overdraft && used > 0) overdraft = findUnlinkedOverdraftForAccount(state.overdrafts || [], account);
+  let action = 'account-updated';
+  if (!overdraft && used > 0) {
+    overdraft = {
+      id: createId('overdraft'),
+      accountId: account.id,
+      name: `${account.name || account.institution || 'Account'} overdraft`,
+      type: 'overdraft',
+      currentBalance: used,
+      limit: preview.summary.overdraftLimit ?? null,
+      apr: null,
+      contractualPayment: null,
+      status: Number.isFinite(preview.summary.overdraftLimit) && used > preview.summary.overdraftLimit ? 'over_limit' : 'current',
+      includeInPlan: true,
+      arrangementConfirmed: false,
+      interestFrozen: false,
+      planPriority: 999,
+      description: 'Automatically kept in sync with the linked bank statement balance.',
+      notes: 'Confirm the arranged limit and APR if they are not shown on the statement.'
+    };
+    state.overdrafts.push(overdraft);
+    action = 'overdraft-created';
+  }
+  if (!overdraft) return action;
+  overdraft.accountId = account.id;
+  overdraft.currentBalance = used;
+  if (Number.isFinite(preview.summary.overdraftLimit)) overdraft.limit = preview.summary.overdraftLimit;
+  if (Number.isFinite(preview.summary.overdraftApr)) overdraft.apr = preview.summary.overdraftApr;
+  if (overdraft.status === 'over_limit' && (!Number.isFinite(overdraft.limit) || used <= overdraft.limit)) overdraft.status = 'current';
+  if (Number.isFinite(overdraft.limit) && used > overdraft.limit) overdraft.status = 'over_limit';
+  overdraft.statementDate = account.statementDate;
+  overdraft.sourceStatementDocumentId = documentId;
+  overdraft.updatedAt = new Date().toISOString();
+  return action === 'overdraft-created' ? action : 'overdraft-updated';
+}
+
 export function matchInternalTransfers(transactions) {
   const credits = transactions.filter((item) => item.incoming > 0 && item.transferStatus !== 'confirmed');
   const matches = [];
@@ -247,7 +331,62 @@ function priorityOrder(items, balances, strategy) {
 }
 
 function isBlankState(state) {
-  return ['accounts', 'transactions', 'payslips', 'debts', 'overdrafts', 'budgets'].every((key) => !(state[key] || []).length);
+  return ['accounts', 'transactions', 'payslips', 'creditReports', 'debts', 'overdrafts', 'budgets'].every((key) => !(state[key] || []).length);
+}
+
+function reportedAccountMatches(existing, reported) {
+  const existingLender = creditorKey(existing.name);
+  const reportedLender = creditorKey(reported.lender);
+  if (!existingLender || existingLender !== reportedLender) return false;
+  const existingReference = referenceKey(existing.accountReference);
+  const reportedReference = referenceKey(reported.accountReference);
+  if (existingReference && reportedReference && existingReference !== reportedReference) return false;
+  const existingType = reportedTypeKey(existing.type);
+  const reportedType = reportedTypeKey(reported.accountType);
+  return !existingType || !reportedType || existingType === reportedType;
+}
+
+function creditorKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b(?:the|plc|limited|ltd|llp|incorporated|inc|company|co)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function referenceKey(value) {
+  return String(value || '').replace(/[^a-z0-9]/gi, '').slice(-4).toLowerCase();
+}
+
+function reportedTypeKey(value) {
+  const text = String(value || '').toLowerCase();
+  if (/overdraft|current account/.test(text)) return 'overdraft';
+  if (/credit card|store card|charge card/.test(text)) return 'card';
+  if (/hire purchase|vehicle|motor finance/.test(text)) return 'vehicle-finance';
+  if (/mortgage/.test(text)) return 'mortgage';
+  if (/loan/.test(text)) return 'loan';
+  if (/mobile|communications|telecom/.test(text)) return 'communications';
+  if (/catalogue|mail order/.test(text)) return 'catalogue';
+  return text.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function reportedAccountKind(account) {
+  return reportedTypeKey(account.accountType) === 'overdraft' ? 'overdraft' : 'debt';
+}
+
+function findUnlinkedOverdraftForAccount(overdrafts, account) {
+  const accountNames = [account.name, account.institution].map(accountMatchKey).filter(Boolean);
+  const candidates = overdrafts.filter((item) => !item.accountId && accountNames.some((name) => {
+    const overdraftName = accountMatchKey(item.name);
+    return overdraftName && (overdraftName === name || overdraftName.includes(name) || name.includes(overdraftName));
+  }));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function accountMatchKey(value) {
+  return String(value || '').toLowerCase().replace(/\b(?:bank|current|account|overdraft|plc|limited|ltd|the)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 }
 
 function currentMonth() {
@@ -289,4 +428,13 @@ function weekKey(date) {
   const value = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
   return value.toISOString().slice(0, 10);
+}
+
+function localDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "meta": {
     "createdAt": "",
     "updatedAt": ""
@@ -15,6 +15,7 @@
   "transactions": [],
   "payslips": [],
   "taxDocuments": [],
+  "creditReports": [],
   "debts": [],
   "overdrafts": [],
   "budgets": [],
