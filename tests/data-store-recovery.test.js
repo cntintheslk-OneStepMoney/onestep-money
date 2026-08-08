@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FinanceDataStore, RecoveryModeError } from '../data-store.js';
+import { debtPlan } from '../finance-core.js';
 
 const seedPath = new URL('../seed-data.json', import.meta.url);
 const fixedNow = new Date('2026-08-08T12:34:56.000Z');
@@ -14,7 +15,7 @@ test('a genuine first launch creates one valid initial state and starts normally
   const first = await harness.store.loadState();
   assert.equal(first.status, 'normal');
   assert.equal(first.source, 'first_install');
-  assert.equal(first.state.schemaVersion, 5);
+  assert.equal(first.state.schemaVersion, 6);
 
   const firstBytes = await fs.readFile(harness.store.statePath);
   const second = await harness.store.loadState();
@@ -35,6 +36,35 @@ test('a valid existing state opens normally without rewriting it', async (t) => 
   assert.equal(result.source, 'existing');
   assert.equal(result.state.profile.name, 'Fictional User');
   assert.deepEqual(await fs.readFile(harness.store.statePath), original);
+});
+
+test('legacy debt safety fields migrate conservatively and persist across restart', async (t) => {
+  const harness = await createHarness(t);
+  const original = stateEnvelope(validState({
+    profile: { ...validState().profile, dependableIncome: 2000 },
+    debts: [{
+      id: 'fictional-legacy-debt', name: 'Fictional Legacy Loan', type: 'Personal loan', currentBalance: 500,
+      contractualPayment: 25, status: 'current', arrangementConfirmed: false, includeInPlan: true
+    }]
+  }));
+  await fs.writeFile(harness.store.statePath, original);
+
+  const loaded = await harness.store.loadState();
+
+  assert.equal(loaded.state.schemaVersion, 6);
+  assert.equal(loaded.state.debts[0].arrangementStatus, 'unknown');
+  assert.equal(loaded.state.debts[0].arrangementPayment, null);
+  assert.equal(loaded.state.debts[0].statusConflict, false);
+  assert.equal(debtPlan(loaded.state, 'hybrid', 100, '2026-08').safeExtraPayment, 0);
+  await harness.store.saveState(loaded.state);
+
+  const restarted = new FinanceDataStore(harness.directory, seedPath, harness.diagnostics, {
+    secureStorage: secureStorage({ available: false }), clock: () => new Date(fixedNow)
+  });
+  await restarted.initialise();
+  const reopened = await restarted.loadState();
+  assert.equal(reopened.state.debts[0].arrangementStatus, 'unknown');
+  assert.equal(debtPlan(reopened.state, 'hybrid', 100, '2026-08').safeExtraPayment, 0);
 });
 
 for (const scenario of [
@@ -144,7 +174,8 @@ test('restoring a validated backup exits recovery only after the restored state 
   const original = Buffer.from('invalid active state');
   const backup = stateEnvelope(validState({ profile: { ...validState().profile, name: 'Restored User' } }));
   await fs.writeFile(harness.store.statePath, original);
-  await fs.writeFile(path.join(harness.store.backupPath, '2026-08-07-valid.json'), backup);
+  const backupPath = path.join(harness.store.backupPath, '2026-08-07-valid.json');
+  await fs.writeFile(backupPath, backup);
   const recovery = await harness.store.loadState();
   const validBackup = recovery.recovery.backups.find((item) => item.valid);
 
@@ -153,7 +184,8 @@ test('restoring a validated backup exits recovery only after the restored state 
   assert.equal(restored.status, 'normal');
   assert.equal(restored.source, 'restored_backup');
   assert.equal(restored.state.profile.name, 'Restored User');
-  assert.deepEqual(await fs.readFile(harness.store.statePath), backup);
+  assert.equal(restored.state.schemaVersion, 6);
+  assert.deepEqual(await fs.readFile(backupPath), backup);
   const recoveryCopies = await fs.readdir(harness.store.recoveryPath);
   assert.ok(recoveryCopies.length >= 2);
   const originalCopy = recoveryCopies.find((name) => name.startsWith('finance-state.recovery-'));
@@ -231,7 +263,7 @@ test('fresh start requires a live confirmation and cancellation changes nothing'
   const confirmed = await harness.store.confirmFreshStart(confirmedRequest.token);
   assert.equal(confirmed.status, 'normal');
   assert.equal(confirmed.source, 'fresh_start');
-  assert.equal(confirmed.state.schemaVersion, 5);
+  assert.equal(confirmed.state.schemaVersion, 6);
   assert.equal(confirmed.state.accounts.length, 0);
   assert.notDeepEqual(await fs.readFile(harness.store.statePath), original);
   const recoveryCopies = await fs.readdir(harness.store.recoveryPath);

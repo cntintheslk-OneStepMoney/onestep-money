@@ -356,7 +356,7 @@ async function writeCraftedBackup(destination, password, state, options = {}) {
       backupId: crypto.randomUUID(),
       createdAt: '2026-08-08T12:00:00.000Z',
       applicationVersion: options.applicationVersion || '2.1.6',
-      schemaVersion: 5,
+      schemaVersion: state.schemaVersion,
       complete: true,
       documentCount: manifestFiles.filter((entry) => entry.role === 'document').length,
       files: manifestFiles

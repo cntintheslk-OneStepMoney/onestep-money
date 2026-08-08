@@ -1,3 +1,5 @@
+import { debtPlan } from './finance-core.js';
+
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/chat';
 
 export async function checkLocalModel(model = 'qwen2.5:1.5b') {
@@ -38,13 +40,14 @@ export async function askLocalModel(question, state, model = 'qwen2.5:1.5b') {
 }
 
 function financialSnapshot(state) {
+  const plan = debtPlan(state, 'hybrid');
   const month = state.settings?.selectedMonth || '';
   const monthRows = (state.transactions || []).filter((item) => String(item.budgetMonth || item.date).startsWith(month) && item.transferStatus !== 'confirmed');
   const incoming = money(monthRows.reduce((sum, item) => sum + Number(item.incoming || 0), 0));
   const outgoing = money(monthRows.reduce((sum, item) => sum + Number(item.outgoing || 0), 0));
   const budgets = (state.budgets || []).map((item) => `${item.category}: planned ${money(item.planned)}`).join('; ');
-  const debts = (state.debts || []).map((item) => `${item.name}: balance ${money(item.currentBalance)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, payment ${item.contractualPayment ? money(item.contractualPayment) : 'unknown'}, status ${item.status}, interest frozen ${item.interestFrozen ? 'yes' : 'no'}`).join('\n');
-  const overdrafts = (state.overdrafts || []).map((item) => `${item.name}: used ${money(item.currentBalance)}, limit ${item.limit ? money(item.limit) : 'unknown'}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, status ${item.status}`).join('\n');
+  const debts = (state.debts || []).map((item) => `${item.name}: balance ${money(item.currentBalance)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, contractual payment ${knownMoney(item.contractualPayment)}, status ${item.status || 'unknown'}, arrangement ${item.arrangementStatus || 'unknown'}, arrangement payment ${knownMoney(item.arrangementPayment)}, status conflict ${item.statusConflict ? 'yes' : 'no'}, interest frozen ${item.interestFrozen ? 'yes' : 'no'}`).join('\n');
+  const overdrafts = (state.overdrafts || []).map((item) => `${item.name}: used ${money(item.currentBalance)}, limit ${knownMoney(item.limit)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, contractual payment ${knownMoney(item.contractualPayment)}, status ${item.status || 'unknown'}, arrangement ${item.arrangementStatus || 'unknown'}, arrangement payment ${knownMoney(item.arrangementPayment)}, status conflict ${item.statusConflict ? 'yes' : 'no'}`).join('\n');
   return [
     'VERIFIED LOCAL FINANCIAL SNAPSHOT',
     `Selected month: ${month}`,
@@ -55,6 +58,9 @@ function financialSnapshot(state) {
     `Budgets: ${budgets}`,
     `Debts:\n${debts}`,
     `Overdrafts:\n${overdrafts}`,
+    `Financial-safety result: ${plan.overpaymentStatus}; requested optional payment ${money(plan.requestedExtraPayment)}; safely included optional payment ${money(plan.safeExtraPayment)}.`,
+    `Safety explanations: ${plan.explanations.join(' | ') || 'none'}`,
+    `Accounts excluded from optional payments: ${plan.excludedAccounts.map((item) => `${item.name} (${item.reason})`).join('; ') || 'none'}`,
     'Unknown values are genuinely unknown. Do not replace them with zero.'
   ].join('\n');
 }
@@ -63,7 +69,8 @@ function systemPrompt() {
   return `You are a small, private UK personal-finance guide running entirely on the user's computer.
 Use only the verified snapshot. Never invent balances, APRs, due dates, payment arrangements or savings.
 Apply this safety order: essential living costs; payments needed to prevent missed payments/defaults; contractual minimums; a small emergency buffer; only then overpayments.
-Never call provisional money "available" when bills or rates are unknown. Never tell the user to borrow, gamble, invest to solve debt, or ignore a creditor.
+Treat OneStep's financial-safety result as a hard ceiling. Never recommend more than the safely included optional payment, and recommend no extra payment when the result is blocked.
+Never overpay a defaulted or arrears account beyond a confirmed arrangement. Never call provisional money "available" when bills, arrangements, required payments, limits or statuses are unknown. Never tell the user to borrow, gamble, invest to solve debt, or ignore a creditor.
 Keep the response ADHD-friendly. Give at most one Immediate action, then optional This week and This month sections. Each action needs a short time estimate. Use short sentences and no more than 180 words.
 Distinguish debts from overdrafts. Explain unknowns plainly. If a formal debt solution may be relevant, suggest free UK debt advice without claiming that it is definitely suitable.
 This is guidance, not authority to move money or contact anyone.`;
@@ -71,4 +78,8 @@ This is guidance, not authority to move money or contact anyone.`;
 
 function money(value) {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number(value || 0));
+}
+
+function knownMoney(value) {
+  return value === null || value === undefined || value === '' ? 'unknown' : money(value);
 }

@@ -10,7 +10,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 const PORTABLE_BACKUP_FORMAT_VERSION = 2;
 const LOCAL_BACKUP_FORMAT_VERSION = 1;
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 const FRESH_START_CONFIRMATION_MS = 5 * 60 * 1000;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
@@ -97,7 +97,7 @@ export class FinanceDataStore {
     this.secureStorage = options.secureStorage;
     this.clock = typeof options.clock === 'function' ? options.clock : () => new Date();
     this.migrate = typeof options.migrateState === 'function' ? options.migrateState : migrateState;
-    this.appVersion = typeof options.appVersion === 'string' ? options.appVersion : '2.1.6';
+    this.appVersion = typeof options.appVersion === 'string' ? options.appVersion : '2.1.8';
     this.faultInjector = typeof options.faultInjector === 'function' ? options.faultInjector : async () => {};
     this.mode = RECOVERY_MODES.NORMAL;
     this.recovery = null;
@@ -1796,8 +1796,8 @@ function migrateState(input) {
     payslips: Array.isArray(state.payslips) ? state.payslips : [],
     taxDocuments: Array.isArray(state.taxDocuments) ? state.taxDocuments : [],
     creditReports: Array.isArray(state.creditReports) ? state.creditReports : [],
-    debts: Array.isArray(state.debts) ? state.debts : [],
-    overdrafts: Array.isArray(state.overdrafts) ? state.overdrafts : [],
+    debts: Array.isArray(state.debts) ? state.debts.map(migrateDebtSafetyRecord) : [],
+    overdrafts: Array.isArray(state.overdrafts) ? state.overdrafts.map(migrateDebtSafetyRecord) : [],
     budgets: Array.isArray(state.budgets) ? state.budgets : [],
     scheduledPayments: Array.isArray(state.scheduledPayments) ? state.scheduledPayments : [],
     documents: Array.isArray(state.documents) ? state.documents : [],
@@ -1818,6 +1818,36 @@ function migrateState(input) {
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function migrateDebtSafetyRecord(item) {
+  if (!isPlainObject(item)) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+  const supportedStatuses = new Set(['current', 'arrears', 'defaulted', 'over_limit', 'unknown']);
+  const supportedArrangements = new Set(['unknown', 'none', 'confirmed']);
+  const previousStatus = String(item.status || '').trim().toLowerCase();
+  const status = supportedStatuses.has(previousStatus) ? previousStatus : 'unknown';
+  const previousArrangement = String(item.arrangementStatus || '').trim().toLowerCase();
+  const arrangementStatus = supportedArrangements.has(previousArrangement)
+    ? previousArrangement
+    : item.arrangementConfirmed === true ? 'confirmed' : 'unknown';
+  const arrangementPayment = finiteNonNegativeOrNull(item.arrangementPayment);
+  const arrearsAmount = finiteNonNegativeOrNull(item.arrearsAmount);
+  return {
+    ...item,
+    ...(previousStatus && status === 'unknown' && !item.statusDetail ? { statusDetail: item.status } : {}),
+    status,
+    arrangementStatus,
+    arrangementConfirmed: arrangementStatus === 'confirmed',
+    arrangementPayment,
+    arrearsAmount,
+    statusConflict: Boolean(item.statusConflict)
+  };
+}
+
+function finiteNonNegativeOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 async function atomicWrite(destination, contents) {
@@ -1895,6 +1925,16 @@ function validateMigratedState(state) {
     state.settings.extraIncomeDebtPercent
   ]) {
     if (!Number.isFinite(Number(value))) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+  }
+  for (const item of [...state.debts, ...state.overdrafts]) {
+    if (!isPlainObject(item)
+      || !['current', 'arrears', 'defaulted', 'over_limit', 'unknown'].includes(item.status)
+      || !['unknown', 'none', 'confirmed'].includes(item.arrangementStatus)
+      || item.arrangementConfirmed !== (item.arrangementStatus === 'confirmed')
+      || (item.arrangementPayment !== null && (!Number.isFinite(item.arrangementPayment) || item.arrangementPayment < 0))
+      || (item.arrearsAmount !== null && (!Number.isFinite(item.arrearsAmount) || item.arrearsAmount < 0))) {
+      throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+    }
   }
 }
 

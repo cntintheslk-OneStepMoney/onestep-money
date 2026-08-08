@@ -499,6 +499,9 @@ h3 { margin-bottom: 0.25rem; font-size: 0.98rem; letter-spacing: -0.012em; }
 .check-card.positive { color: #0c684b; background: var(--green-soft); border-color: #c8eadc; border-left-color: var(--green); }
 .check-card h3 { color: var(--ink); }
 .check-card p { margin: 0; color: #52637a; font-size: 0.87rem; line-height: 1.48; }
+.plan-why { position: relative; z-index: 1; margin-top: 0.72rem; padding-top: 0.62rem; border-top: 1px solid currentColor; }
+.plan-why summary { width: fit-content; color: var(--ink-soft); font-size: 0.78rem; font-weight: 780; cursor: pointer; }
+.plan-why ul { display: grid; gap: 0.35rem; margin: 0.55rem 0 0; padding-left: 1.1rem; color: #52637a; font-size: 0.78rem; line-height: 1.45; }
 
 label { display: grid; gap: 0.36rem; color: #53647b; font-size: 0.79rem; font-weight: 710; }
 input, select, textarea {
