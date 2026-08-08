@@ -40,6 +40,11 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   assert.ok(Object.isFrozen(exposed.api));
   await exposed.api.loadState();
   await exposed.api.saveState({ ok: true });
+  await exposed.api.retryRecovery();
+  await exposed.api.restoreRecoveryBackup('backup-id');
+  await exposed.api.requestFreshStart();
+  await exposed.api.cancelFreshStart('confirmation-token');
+  await exposed.api.confirmFreshStart('confirmation-token');
   await exposed.api.importFiles({ kind: 'statement' });
   await exposed.api.previewDiagnostics();
   await exposed.api.exportDiagnostics('preview-token');
@@ -49,6 +54,11 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   assert.deepEqual(invocations, [
     ['state:load'],
     ['state:save', { ok: true }],
+    ['recovery:retry'],
+    ['recovery:restore-backup', 'backup-id'],
+    ['recovery:fresh-start:request'],
+    ['recovery:fresh-start:cancel', 'confirmation-token'],
+    ['recovery:fresh-start:confirm', 'confirmation-token'],
     ['import:choose', { kind: 'statement' }],
     ['diagnostics:preview'],
     ['diagnostics:export', 'preview-token'],

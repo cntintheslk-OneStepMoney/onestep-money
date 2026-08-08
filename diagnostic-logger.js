@@ -16,6 +16,8 @@ const EVENT_DEFINITIONS = Object.freeze({
   SECURE_STORAGE_UNAVAILABLE: { level: 'warning', reference: 'SEC-101', stage: 'secure_storage', layer: 'startup' },
   STATE_LOAD_RECOVERED: { level: 'error', reference: 'DAT-101', stage: 'state_load', layer: 'detail' },
   STATE_SAVE_FAILED: { level: 'error', reference: 'DAT-102', stage: 'state_save', layer: 'detail' },
+  STATE_RECOVERY_REQUIRED: { level: 'error', reference: 'DAT-103', stage: 'state_recovery', layer: 'detail', fields: ['reasonCode'] },
+  RECOVERY_OPERATION_FAILED: { level: 'error', reference: 'DAT-104', stage: 'state_recovery', layer: 'detail', fields: ['reasonCode'] },
   DOCUMENT_IMPORT_FAILED: { level: 'error', reference: 'IMP-101', stage: 'document_import', layer: 'detail', fields: ['documentType', 'fileType'] },
   DOCUMENT_OPEN_FAILED: { level: 'error', reference: 'DOC-101', stage: 'document_open', layer: 'detail' },
   DOCUMENT_DELETE_FAILED: { level: 'error', reference: 'DOC-102', stage: 'document_delete', layer: 'detail' },
@@ -40,6 +42,11 @@ const FAULT_CLASSIFIERS = [
 
 const ALLOWED_DOCUMENT_TYPES = new Set(['statement', 'payslip']);
 const ALLOWED_FILE_TYPES = new Set(['pdf', 'csv', 'qif', 'ofx', 'json']);
+const ALLOWED_REASON_CODES = new Set([
+  'state_not_found', 'read_failure', 'decryption_failure', 'encryption_key_unavailable',
+  'invalid_content', 'schema_validation_failure', 'migration_failure', 'unknown_storage_failure',
+  'backup_discovery_failed', 'restore_failed', 'fresh_start_failed'
+]);
 const ALLOWED_ERROR_NAMES = new Set(['Error', 'TypeError', 'ReferenceError', 'RangeError', 'SyntaxError', 'URIError', 'AggregateError']);
 const ALLOWED_CLASSIFICATIONS = new Set(['PDF_RENDER_DOMMATRIX_MISSING', 'PDF_RENDER_DOMPOINT_MISSING', 'DOCUMENT_FORMAT_UNSUPPORTED', 'FILE_DAMAGED', 'STORAGE_FULL', 'PERMISSION_DENIED', 'SECURE_STORAGE_UNAVAILABLE', 'UNCLASSIFIED_FAILURE']);
 const ALLOWED_REFERENCES = new Set([
@@ -144,6 +151,7 @@ export class DiagnosticLogger {
       const details = [
         entry.documentType ? `document_type=${entry.documentType}` : '',
         entry.fileType ? `file_type=${entry.fileType}` : '',
+        entry.reasonCode ? `reason_code=${entry.reasonCode}` : '',
         entry.fault?.name ? `fault=${entry.fault.name}` : '',
         entry.fault?.classification ? `classification=${entry.fault.classification}` : ''
       ].filter(Boolean).join(' ');
@@ -298,6 +306,7 @@ function normaliseStoredEntry(entry) {
 
 function sanitiseField(field, value) {
   if (field === 'documentType') return ALLOWED_DOCUMENT_TYPES.has(value) ? value : null;
+  if (field === 'reasonCode') return ALLOWED_REASON_CODES.has(value) ? value : null;
   if (field === 'fileType') {
     const extension = String(value || '').toLowerCase().replace(/^\./, '');
     return ALLOWED_FILE_TYPES.has(extension) ? extension : null;
