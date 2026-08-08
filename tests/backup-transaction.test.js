@@ -283,6 +283,33 @@ test('pre-commit cancellation and legacy classification are explicit and non-des
   assert.deepEqual(await fs.readFile(harness.store.statePath), before);
 });
 
+test('deleting an imported vault file retains fingerprint provenance through backup and restore', async (t) => {
+  const harness = await createHarness(t);
+  let { state, fixture } = await stateWithDocument(harness, 'Fictional User', 'fictional completed statement');
+  const document = state.documents[0];
+  document.parseStatus = 'imported';
+  state.importBatches.push({ id: 'fictional-import-batch', documentId: document.id, kind: 'statement', importedAt: '2026-08-08T12:00:00.000Z', recordCount: 1 });
+  state = await harness.store.saveState(state);
+
+  assert.equal(await harness.store.deleteDocument(document.id, state.documents), true);
+  state = await harness.store.saveState(state);
+  assert.ok(state.documents[0].deletedAt);
+  assert.equal(state.documents[0].parseStatus, 'deleted');
+  assert.deepEqual(await fs.readdir(harness.store.vaultPath), []);
+
+  const prepared = await harness.store.inspectDocument(fixture, state.documents);
+  assert.equal(prepared.duplicate, true);
+  assert.equal(prepared.document.id, document.id);
+
+  const backup = path.join(harness.directory, 'tombstone.osmb');
+  await harness.store.createPortableBackup(backup, passphrase, state);
+  const restored = await harness.store.restorePortableBackup(backup, passphrase);
+  assert.equal(restored.status, 'restored');
+  assert.equal(restored.state.documents[0].sha256, document.sha256);
+  assert.ok(restored.state.documents[0].deletedAt);
+  assert.deepEqual(await fs.readdir(harness.store.vaultPath), []);
+});
+
 async function createHarness(t, options = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-backup-'));
   if (options.cleanup !== false) t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -294,7 +294,8 @@ function bindEvents() {
   byId('accountCards').addEventListener('click', handleEditClick);
   byId('saveEditButton').addEventListener('click', saveEditor);
   byId('confirmImportButton').addEventListener('click', confirmCurrentImport);
-  byId('importDialog').addEventListener('close', () => { if (currentImport) { currentImport = null; showNextImport(); } });
+  byId('importDialog').addEventListener('close', handleImportDialogClosed);
+  byId('importResultDialog').addEventListener('close', () => { currentImport = null; showNextImport(); });
   byId('guideForm').addEventListener('submit', askGuide);
   document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventListener('click', () => { byId('guideQuestion').value = button.dataset.prompt; byId('guideQuestion').focus(); }));
   byId('checkModelButton').addEventListener('click', checkModel);
@@ -556,7 +557,7 @@ function renderBudget() {
 
 function renderDocuments() {
   const container = byId('documentCards'); clear(container);
-  const documents = [...state.documents].sort((left, right) => right.importedAt.localeCompare(left.importedAt));
+  const documents = state.documents.filter((document) => !document.deletedAt).sort((left, right) => right.importedAt.localeCompare(left.importedAt));
   if (!documents.length) {
     const empty = element('article', 'panel'); append(empty, element('h2', '', 'No secure documents yet'), element('p', 'muted', 'Import a bank statement, payslip or credit report. The encrypted original will appear here automatically.')); container.append(empty); return;
   }
@@ -624,6 +625,15 @@ async function importDocuments(kind) {
 function showNextImport() {
   if (currentImport || !importQueue.length) return;
   currentImport = importQueue.shift();
+  if (currentImport.status === 'duplicate' || currentImport.status === 'pending') {
+    const duplicate = currentImport.status === 'duplicate';
+    byId('importResultTitle').textContent = duplicate ? 'Already imported' : 'Already selected';
+    byId('importResultMessage').textContent = duplicate
+      ? 'OneStep recognised this document from its contents. Renaming, copying or moving the file does not create a new financial document.'
+      : 'This document is already waiting for review. Finish or close its existing preview before selecting it again.';
+    byId('importResultDialog').showModal();
+    return;
+  }
   const preview = currentImport.preview;
   byId('importTitle').textContent = currentImport.document.originalName;
   const summary = byId('importSummary'); clear(summary);
@@ -705,12 +715,29 @@ async function confirmCurrentImport(event) {
     if (exactIds.size) showToast(`${exactIds.size} exact duplicate${exactIds.size === 1 ? '' : 's'} skipped.`);
   }
   const recordCount = preview.kind === 'credit-report' ? (preview.records[0]?.accounts || []).length : preview.records.length;
+  const stateDocument = state.documents.find((document) => document.id === currentImport.document.id);
+  if (stateDocument) stateDocument.parseStatus = 'imported';
   state.importBatches.push({ id: createId('import'), documentId: currentImport.document.id, kind: preview.kind, importedAt: new Date().toISOString(), recordCount, reconciled: preview.reconciled });
   await saveState();
-  byId('importDialog').close('confirmed');
   currentImport = null;
+  byId('importDialog').close('confirmed');
   render();
   showToast(completionMessage);
+  showNextImport();
+}
+
+async function handleImportDialogClosed() {
+  if (!currentImport) return;
+  const abandoned = currentImport;
+  currentImport = null;
+  if (abandoned.status === 'ready') {
+    const document = state.documents.find((item) => item.id === abandoned.document.id);
+    if (document && document.parseStatus !== 'imported') {
+      document.parseStatus = 'needs_review';
+      await saveState();
+      renderDocuments();
+    }
+  }
   showNextImport();
 }
 
@@ -972,7 +999,7 @@ async function handleDocumentClick(event) {
   if (open) { try { await window.financeAPI.openDocument(open.dataset.documentOpen); } catch (error) { showToast(error.message); } return; }
   const remove = event.target.closest('[data-document-delete]');
   if (remove && window.confirm('Permanently delete this encrypted document? Records already imported from it will remain.')) {
-    state = await window.financeAPI.deleteDocument(remove.dataset.documentDelete); render(); showToast('Encrypted document deleted.');
+    state = await window.financeAPI.deleteDocument(remove.dataset.documentDelete); render(); showToast('Encrypted document deleted. Its private import fingerprint was retained to prevent duplicate financial records.');
   }
 }
 

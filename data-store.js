@@ -138,7 +138,7 @@ export class FinanceDataStore {
     }
 
     try {
-      await this.loadOrCreateVaultKey({ hasDocuments: inspected.state.documents.length > 0 });
+      await this.loadOrCreateVaultKey({ hasDocuments: vaultDocuments(inspected.state.documents).length > 0 });
     } catch (error) {
       return this.enterRecovery(LOAD_REASON_CODES.ENCRYPTION_KEY_UNAVAILABLE, error);
     }
@@ -168,7 +168,7 @@ export class FinanceDataStore {
     const inspected = await this.inspectStateFile(this.statePath);
     if (inspected.status === 'loaded') {
       try {
-        await this.loadOrCreateVaultKey({ hasDocuments: inspected.state.documents.length > 0 });
+        await this.loadOrCreateVaultKey({ hasDocuments: vaultDocuments(inspected.state.documents).length > 0 });
         this.clearRecovery();
         return this.normalResult(inspected.state, 'existing');
       } catch (error) {
@@ -492,7 +492,8 @@ export class FinanceDataStore {
         }
         if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.json') {
           const [inspection, stat] = await Promise.all([this.inspectStateFile(target), fs.stat(target)]);
-          const complete = inspection.status === 'loaded' && inspection.state.documents.length === 0;
+          const availableDocumentCount = inspection.status === 'loaded' ? vaultDocuments(inspection.state.documents).length : null;
+          const complete = inspection.status === 'loaded' && availableDocumentCount === 0;
           const descriptor = {
             id,
             createdAt: stat.mtime.toISOString(),
@@ -502,7 +503,7 @@ export class FinanceDataStore {
             classification: inspection.status === 'loaded' ? (complete ? 'legacy_complete' : 'legacy_state_only') : 'corrupt',
             schemaVersion: inspection.status === 'loaded' ? inspection.schemaVersion : null,
             applicationVersion: null,
-            documentCount: inspection.status === 'loaded' ? inspection.state.documents.length : null,
+            documentCount: availableDocumentCount,
             migrationRequired: false,
             reasonCode: complete ? null : inspection.status === 'loaded' ? 'legacy_state_only' : inspection.reasonCode || LOAD_REASON_CODES.UNKNOWN_STORAGE_FAILURE
           };
@@ -528,8 +529,9 @@ export class FinanceDataStore {
     if (candidate.type === 'local_set') {
       const inspected = await this.validateLocalBackupSet(candidate.path, { requireSemanticValidation: true });
       const files = new Map([['state.json', Buffer.from(JSON.stringify(inspected.state), 'utf8')]]);
-      const key = await this.readVaultKeyAt(path.join(candidate.path, 'data', KEY_FILE), inspected.state.documents.length > 0);
-      for (const document of inspected.state.documents) {
+      const availableDocuments = vaultDocuments(inspected.state.documents);
+      const key = await this.readVaultKeyAt(path.join(candidate.path, 'data', KEY_FILE), availableDocuments.length > 0);
+      for (const document of availableDocuments) {
         const encrypted = await fs.readFile(path.join(candidate.path, 'data', 'document-vault', document.storedName));
         files.set(`documents/${document.id}.bin`, decryptVaultBytesWithKey(encrypted, key));
       }
@@ -543,7 +545,7 @@ export class FinanceDataStore {
           createdAt: inspected.manifest.createdAt,
           applicationVersion: inspected.manifest.applicationVersion,
           schemaVersion: inspected.state.schemaVersion,
-          documents: inspected.state.documents,
+          documents: availableDocuments,
           files
         }),
         files,
@@ -551,7 +553,7 @@ export class FinanceDataStore {
         sourceFingerprint: inspected.sourceFingerprint
       };
     }
-    if (candidate.type === 'legacy_state' && candidate.inspection?.status === 'loaded' && candidate.inspection.state.documents.length === 0) {
+    if (candidate.type === 'legacy_state' && candidate.inspection?.status === 'loaded' && vaultDocuments(candidate.inspection.state.documents).length === 0) {
       const state = candidate.inspection.state;
       const files = new Map([['state.json', Buffer.from(JSON.stringify(state), 'utf8')]]);
       return {
@@ -575,7 +577,7 @@ export class FinanceDataStore {
     throw new Error('The selected recovery backup is incomplete.');
   }
 
-  async storeDocument(filePath, kind, existingDocuments = []) {
+  async inspectDocument(filePath, existingDocuments = []) {
     this.assertWritable();
     if (!this.encryptionAvailable() || !this.vaultKey) {
       throw new Error('Secure document storage is unavailable on this device.');
@@ -584,14 +586,23 @@ export class FinanceDataStore {
     const bytes = await fs.readFile(filePath);
     const digest = crypto.createHash('sha256').update(bytes).digest('hex');
     const duplicate = existingDocuments.find((document) => document.sha256 === digest);
-    if (duplicate) {
-      return { document: duplicate, duplicate: true };
+    return { filePath, bytes, sha256: digest, document: duplicate || null, duplicate: Boolean(duplicate) };
+  }
+
+  async storeDocument(filePath, kind, existingDocuments = [], prepared = null) {
+    const inspection = prepared || await this.inspectDocument(filePath, existingDocuments);
+    this.assertWritable();
+    if (!this.encryptionAvailable() || !this.vaultKey) {
+      throw new Error('Secure document storage is unavailable on this device.');
     }
+    if (inspection.filePath !== filePath || !Buffer.isBuffer(inspection.bytes) || !/^[0-9a-f]{64}$/.test(inspection.sha256)) throw new Error('The prepared document is invalid.');
+    const duplicate = existingDocuments.find((document) => document.sha256 === inspection.sha256);
+    if (duplicate) return { document: duplicate, duplicate: true };
 
     const id = crypto.randomUUID();
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.vaultKey, iv);
-    const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
+    const ciphertext = Buffer.concat([cipher.update(inspection.bytes), cipher.final()]);
     const tag = cipher.getAuthTag();
     const encryptedBytes = Buffer.concat([VAULT_MAGIC, iv, tag, ciphertext]);
     const storedName = `${id}.vault`;
@@ -605,8 +616,8 @@ export class FinanceDataStore {
         storedName,
         kind,
         mimeType: mimeFromName(filePath),
-        size: bytes.length,
-        sha256: digest,
+        size: inspection.bytes.length,
+        sha256: inspection.sha256,
         importedAt: this.clock().toISOString(),
         parseStatus: 'pending',
         linkedRecordIds: [],
@@ -618,7 +629,7 @@ export class FinanceDataStore {
   async readDocument(id, documents) {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Invalid document identifier.');
     const document = documents.find((entry) => entry.id === id);
-    if (!document) throw new Error('Document not found.');
+    if (!document || document.deletedAt) throw new Error('Document not found.');
     const encrypted = await fs.readFile(path.join(this.vaultPath, document.storedName));
     return { document, bytes: this.decryptVaultBytes(encrypted) };
   }
@@ -626,10 +637,15 @@ export class FinanceDataStore {
   async deleteDocument(id, documents) {
     this.assertWritable();
     const document = documents.find((entry) => entry.id === id);
-    if (!document) return false;
+    if (!document || document.deletedAt) return false;
     await fs.unlink(path.join(this.vaultPath, document.storedName)).catch((error) => {
       if (error.code !== 'ENOENT') throw error;
     });
+    document.deletedAt = this.clock().toISOString();
+    document.parseStatus = 'deleted';
+    document.originalName = 'Deleted financial document';
+    document.displayName = 'Deleted financial document';
+    document.notes = '';
     return true;
   }
 
@@ -646,7 +662,8 @@ export class FinanceDataStore {
       const backupId = crypto.randomUUID();
       const files = new Map();
       files.set('state.json', Buffer.from(JSON.stringify(snapshotState), 'utf8'));
-      for (const document of snapshotState.documents) {
+      const availableDocuments = vaultDocuments(snapshotState.documents);
+      for (const document of availableDocuments) {
         validateDocumentMetadata(document);
         const { bytes } = await this.readDocument(document.id, snapshotState.documents);
         if (bytes.length !== document.size || sha256(bytes) !== document.sha256) {
@@ -659,7 +676,7 @@ export class FinanceDataStore {
         createdAt,
         applicationVersion: this.appVersion,
         schemaVersion: snapshotState.schemaVersion,
-        documents: snapshotState.documents,
+        documents: availableDocuments,
         files
       });
       const payload = Buffer.from(JSON.stringify({
@@ -781,7 +798,8 @@ export class FinanceDataStore {
       documentsById.set(entry.metadata.id, entry.metadata);
       files.set(`documents/${entry.metadata.id}.bin`, bytes);
     }
-    const expectedIds = new Set(state.documents.map((document) => {
+    const availableDocuments = vaultDocuments(state.documents);
+    const expectedIds = new Set(availableDocuments.map((document) => {
       validateDocumentMetadata(document);
       return document.id;
     }));
@@ -793,13 +811,13 @@ export class FinanceDataStore {
       createdAt,
       applicationVersion: null,
       schemaVersion: state.schemaVersion,
-      documents: state.documents,
+      documents: availableDocuments,
       files
     });
     return {
       formatVersion: 1,
-      classification: complete ? 'legacy_complete' : state.documents.length ? 'legacy_state_only' : 'legacy_complete',
-      complete: complete || state.documents.length === 0,
+      classification: complete ? 'legacy_complete' : availableDocuments.length ? 'legacy_state_only' : 'legacy_complete',
+      complete: complete || availableDocuments.length === 0,
       valid: true,
       manifest,
       files,
@@ -837,7 +855,7 @@ export class FinanceDataStore {
         documentFiles.add(entry.name);
       }
     } else {
-      for (const document of options.state.documents) {
+      for (const document of vaultDocuments(options.state.documents)) {
         validateDocumentMetadata(document);
         documentFiles.add(document.storedName);
       }
@@ -855,7 +873,7 @@ export class FinanceDataStore {
       createdAt: this.clock().toISOString(),
       applicationVersion: this.appVersion,
       schemaVersion: options.state.schemaVersion,
-      documentCount: options.state.documents.length,
+      documentCount: vaultDocuments(options.state.documents).length,
       purpose: options.purpose
     });
     await atomicWrite(path.join(destination, 'manifest.json'), JSON.stringify(manifest));
@@ -906,11 +924,12 @@ export class FinanceDataStore {
     const inspected = await this.inspectStateFile(path.join(dataPath, stateEntry.path));
     if (inspected.status !== 'loaded') throw new StateLoadError(inspected.reasonCode || LOAD_REASON_CODES.INVALID_CONTENT, inspected.error);
     if (inspected.state.schemaVersion !== CURRENT_SCHEMA_VERSION) throw new Error('The backup financial state could not be migrated safely.');
-    if (manifest.documentCount !== inspected.state.documents.length) throw new Error('The backup document count does not match its financial state.');
+    const availableDocuments = vaultDocuments(inspected.state.documents);
+    if (manifest.documentCount !== availableDocuments.length) throw new Error('The backup document count does not match its financial state.');
 
-    const vaultKey = await this.readVaultKeyAt(path.join(dataPath, KEY_FILE), inspected.state.documents.length > 0);
+    const vaultKey = await this.readVaultKeyAt(path.join(dataPath, KEY_FILE), availableDocuments.length > 0);
     const expectedDocumentFiles = new Set();
-    for (const document of inspected.state.documents) {
+    for (const document of availableDocuments) {
       validateDocumentMetadata(document);
       const relative = `document-vault/${document.storedName}`;
       expectedDocumentFiles.add(relative);
@@ -967,11 +986,12 @@ export class FinanceDataStore {
 
   async createStagedDataset(destination, decoded) {
     await fs.mkdir(path.join(destination, 'data', 'document-vault'), { recursive: true, mode: 0o700 });
-    if (decoded.state.documents.length && !this.encryptionAvailable()) throw new StateLoadError(LOAD_REASON_CODES.ENCRYPTION_KEY_UNAVAILABLE);
+    const availableDocuments = vaultDocuments(decoded.state.documents);
+    if (availableDocuments.length && !this.encryptionAvailable()) throw new StateLoadError(LOAD_REASON_CODES.ENCRYPTION_KEY_UNAVAILABLE);
     const stagingVaultKey = this.encryptionAvailable() ? crypto.randomBytes(32) : null;
     const stateBytes = this.encodeStateEnvelope(decoded.state);
     await fs.writeFile(path.join(destination, 'data', STATE_FILE), stateBytes, { mode: 0o600, flag: 'wx' });
-    for (const document of decoded.state.documents) {
+    for (const document of availableDocuments) {
       validateDocumentMetadata(document);
       const contents = decoded.files.get(`documents/${document.id}.bin`);
       if (!contents) throw new Error('The selected backup is missing a required document.');
@@ -987,7 +1007,7 @@ export class FinanceDataStore {
       createdAt: decoded.manifest.createdAt,
       applicationVersion: decoded.manifest.applicationVersion || this.appVersion,
       schemaVersion: decoded.state.schemaVersion,
-      documentCount: decoded.state.documents.length,
+      documentCount: availableDocuments.length,
       purpose: 'restore_staging'
     });
     await atomicWrite(path.join(destination, 'manifest.json'), JSON.stringify(manifest));
@@ -1104,7 +1124,7 @@ export class FinanceDataStore {
       createdAt: this.clock().toISOString(),
       applicationVersion: this.appVersion,
       schemaVersion: state?.schemaVersion ?? null,
-      documentCount: state?.documents.length ?? null,
+      documentCount: state ? vaultDocuments(state.documents).length : null,
       purpose: 'pre_restore_safety'
     });
     await atomicWrite(path.join(destination, 'manifest.json'), JSON.stringify(manifest));
@@ -1160,7 +1180,7 @@ export class FinanceDataStore {
     const actualVault = new Set((await fs.readdir(this.vaultPath, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name));
     if (expectedVault.size !== actualVault.size || [...expectedVault].some((name) => !actualVault.has(name))) throw new Error('The installed document vault contains a mixed file set.');
     const state = await this.validateDatasetSemantics(this.userDataPath, manifest);
-    await this.loadInstalledVaultKey(state.documents.length > 0);
+    await this.loadInstalledVaultKey(vaultDocuments(state.documents).length > 0);
     return { manifest, state };
   }
 
@@ -1197,7 +1217,7 @@ export class FinanceDataStore {
       if (journal.previousMode === RECOVERY_MODES.NORMAL) {
         const verified = await this.validateDatasetSemantics(this.userDataPath, rollbackManifest);
         state = verified;
-        await this.loadInstalledVaultKey(state.documents.length > 0);
+        await this.loadInstalledVaultKey(vaultDocuments(state.documents).length > 0);
       }
       journal.phase = RESTORE_PHASES.ROLLBACK_VERIFIED;
       journal.rollbackCompleted = true;
@@ -1465,9 +1485,10 @@ function decodePortableFiles(value, manifest) {
 }
 
 function validatePortableDocumentSet(state, manifest, files) {
-  if (state.documents.length !== manifest.documentCount) throw new Error('The backup document metadata is incomplete.');
+  const availableDocuments = vaultDocuments(state.documents);
+  if (availableDocuments.length !== manifest.documentCount) throw new Error('The backup document metadata is incomplete.');
   const ids = new Set();
-  for (const document of state.documents) {
+  for (const document of availableDocuments) {
     validateDocumentMetadata(document);
     if (ids.has(document.id)) throw new Error('The backup contains duplicate document identifiers.');
     ids.add(document.id);
@@ -1561,6 +1582,11 @@ function validateDocumentMetadata(document) {
   if (!Number.isInteger(document.size) || document.size < 0 || document.size > MAX_BACKUP_FILE_BYTES || !/^[0-9a-f]{64}$/.test(document.sha256)) {
     throw new Error('Document metadata contains invalid integrity information.');
   }
+  if (document.deletedAt !== undefined && !validIsoDate(document.deletedAt)) throw new Error('Document metadata contains an invalid deletion marker.');
+}
+
+function vaultDocuments(documents) {
+  return documents.filter((document) => !document.deletedAt);
 }
 
 function validateVaultFileName(fileName) {
