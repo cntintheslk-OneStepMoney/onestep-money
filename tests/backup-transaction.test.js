@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FinanceDataStore, PersistenceBusyError, RecoveryModeError } from '../data-store.js';
+import { calculateBudgetAnalysis } from '../finance-core.js';
 
 const seedPath = new URL('../seed-data.json', import.meta.url);
 const passphrase = 'fictional-password';
@@ -93,6 +94,26 @@ test('recovery mode restores a validated automatic backup with its matching docu
   assert.equal(restored.status, 'normal');
   assert.equal(restored.state.profile.name, state.profile.name);
   assert.equal((await harness.store.readDocument(restored.state.documents[0].id, restored.state.documents)).bytes.toString(), 'recovery document');
+});
+
+test('portable backup and restore preserve budget categorisation relationships', async (t) => {
+  const harness = await createHarness(t);
+  let state = (await harness.store.loadState()).state;
+  state.settings.selectedMonth = '2026-08';
+  state.budgets.push({ id: 'fictional-groceries', category: 'Groceries', planned: 200 });
+  state.transactions.push({
+    id: crypto.randomUUID(), date: '2026-08-08', budgetMonth: '2026-08', description: 'Fictional supermarket',
+    incoming: 0, outgoing: 45, transferStatus: 'no', budgetCategoryId: 'fictional-groceries', categorySource: 'manual', budgetTreatment: 'spending'
+  });
+  state = await harness.store.saveState(state);
+  const source = path.join(harness.directory, 'budget-categorisation.osmb');
+  await harness.store.createPortableBackup(source, passphrase, state);
+
+  await harness.store.saveState({ ...state, transactions: [], budgets: [] });
+  const restored = await harness.store.restorePortableBackup(source, passphrase);
+  assert.equal(restored.state.transactions[0].budgetCategoryId, 'fictional-groceries');
+  assert.equal(restored.state.transactions[0].categorySource, 'manual');
+  assert.equal(calculateBudgetAnalysis(restored.state).actual, 45);
 });
 
 test('portable restore stages a new encrypted vault key without altering a keyless live dataset first', async (t) => {

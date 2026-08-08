@@ -50,23 +50,130 @@ export function calculatePeriodSummary(state, month = state.settings?.selectedMo
   const plannedSpending = roundMoney((state.budgets || []).reduce((total, budget) => total + Number(budget.planned || 0), 0));
   const dependableIncome = Number(state.profile?.dependableIncome || 0);
   const plannedMargin = roundMoney(dependableIncome - plannedSpending);
+  const budget = calculateBudgetAnalysis(state, month);
   const overdrafts = sum(state.overdrafts, 'currentBalance');
   const debts = sum(state.debts, 'currentBalance');
   return {
     month, income, spending, netCashFlow: roundMoney(income - spending),
     grossPay, payrollDeductions, netPay, dependableIncome, plannedSpending, plannedMargin,
+    budgetActualSpending: budget.actual, budgetCategorisedSpending: budget.categorisedActual,
+    budgetUncategorisedSpending: budget.uncategorisedActual, budgetRemaining: budget.remaining,
     debts, overdrafts, totalOwed: roundMoney(debts + overdrafts), transactionCount: rows.length
   };
 }
 
 export function calculateBudgetRows(state, month = state.settings?.selectedMonth) {
-  const rows = periodTransactions(state.transactions, month).filter((transaction) => transaction.transferStatus !== 'confirmed');
-  return (state.budgets || []).map((budget) => {
-    const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalise);
-    const terms = (budget.merchantTerms || []).map(normalise);
-    const actual = roundMoney(rows.filter((transaction) => transaction.outgoing > 0 && (categories.includes(normalise(transaction.category)) || terms.some((term) => normalise(transaction.description).includes(term)))).reduce((total, transaction) => total + transaction.outgoing, 0));
-    return { ...budget, actual, remaining: roundMoney(Number(budget.planned || 0) - actual) };
+  return calculateBudgetAnalysis(state, month).rows;
+}
+
+export function calculateBudgetAnalysis(state, month = state.settings?.selectedMonth) {
+  const budgets = state.budgets || [];
+  const transactions = periodTransactions(state.transactions, month);
+  const budgetsById = new Map(budgets.map((budget) => [String(budget.id), budget]));
+  const transactionsById = new Map(transactions.map((transaction) => [String(transaction.id), transaction]));
+  const actualPennies = new Map(budgets.map((budget) => [String(budget.id), 0]));
+  const contributions = new Map(budgets.map((budget) => [String(budget.id), []]));
+  const assignmentCache = new Map();
+  const uncategorisedTransactionIds = [];
+  let uncategorisedPennies = 0;
+  let categorisedGrossPennies = 0;
+  let eligibleGrossPennies = 0;
+
+  const assignedBudget = (transaction, visited = new Set()) => {
+    const transactionId = String(transaction?.id || '');
+    if (transactionId && assignmentCache.has(transactionId)) return assignmentCache.get(transactionId);
+    if (!transaction || visited.has(transactionId)) return null;
+    visited.add(transactionId);
+
+    const explicit = transaction.budgetCategoryId && budgetsById.get(String(transaction.budgetCategoryId));
+    if (explicit) {
+      if (transactionId) assignmentCache.set(transactionId, explicit);
+      return explicit;
+    }
+    if (transaction.categorySource === 'manual') {
+      if (transactionId) assignmentCache.set(transactionId, null);
+      return null;
+    }
+
+    const linkedId = transaction.refundOfTransactionId || transaction.reversalOfTransactionId;
+    const linked = linkedId ? transactionsById.get(String(linkedId)) : null;
+    if (linked) {
+      const linkedBudget = assignedBudget(linked, visited);
+      if (transactionId) assignmentCache.set(transactionId, linkedBudget);
+      return linkedBudget;
+    }
+
+    const category = normalise(transaction.category);
+    const description = normalise(transaction.description);
+    const matches = budgets.filter((budget) => {
+      const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalise);
+      const terms = (budget.merchantTerms || []).map(normalise).filter(Boolean);
+      return (category && categories.includes(category)) || (Number(transaction.outgoing || 0) > 0 && terms.some((term) => description.includes(term)));
+    });
+    const match = matches.length === 1 ? matches[0] : null;
+    if (transactionId) assignmentCache.set(transactionId, match);
+    return match;
+  };
+
+  for (const transaction of transactions) {
+    if (!isBudgetTransactionActive(transaction)) continue;
+    const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
+    if (transaction.transferStatus === 'confirmed' || ['transfer', 'savings_transfer', 'ignored'].includes(treatment)) continue;
+
+    const outgoingPennies = Math.max(0, moneyToPennies(transaction.outgoing));
+    const incomingPennies = Math.max(0, moneyToPennies(transaction.incoming));
+    const budget = assignedBudget(transaction);
+    const isDebtPayment = treatment === 'debt_payment' || /^(?:debt|credit card|loan|finance) payment$/.test(normalise(transaction.category));
+    if (isDebtPayment && !budget) continue;
+
+    if (outgoingPennies > 0) {
+      eligibleGrossPennies += outgoingPennies;
+      if (budget) {
+        const id = String(budget.id);
+        actualPennies.set(id, (actualPennies.get(id) || 0) + outgoingPennies);
+        categorisedGrossPennies += outgoingPennies;
+        contributions.get(id).push(budgetContribution(transaction, outgoingPennies));
+      } else {
+        uncategorisedPennies += outgoingPennies;
+        uncategorisedTransactionIds.push(transaction.id);
+      }
+    }
+
+    const isRefund = ['refund', 'reversal'].includes(treatment)
+      || Boolean(transaction.refundOfTransactionId || transaction.reversalOfTransactionId)
+      || Boolean(budget && incomingPennies > 0);
+    if (incomingPennies > 0 && isRefund && budget) {
+      const id = String(budget.id);
+      actualPennies.set(id, (actualPennies.get(id) || 0) - incomingPennies);
+      contributions.get(id).push(budgetContribution(transaction, -incomingPennies));
+    }
+  }
+
+  const rows = budgets.map((budget) => {
+    const plannedPennies = moneyToPennies(budget.planned);
+    const actual = penniesToMoney(actualPennies.get(String(budget.id)) || 0);
+    const planned = penniesToMoney(plannedPennies);
+    const remaining = penniesToMoney(plannedPennies - moneyToPennies(actual));
+    return {
+      ...budget, planned, actual, remaining,
+      progressPercent: plannedPennies > 0 ? Math.max(0, Math.round(((actualPennies.get(String(budget.id)) || 0) / plannedPennies) * 100)) : null,
+      contributions: contributions.get(String(budget.id)) || []
+    };
   });
+  const plannedPennies = rows.reduce((total, row) => total + moneyToPennies(row.planned), 0);
+  const categorisedPennies = rows.reduce((total, row) => total + moneyToPennies(row.actual), 0);
+  const totalActualPennies = categorisedPennies + uncategorisedPennies;
+  return {
+    month,
+    rows,
+    planned: penniesToMoney(plannedPennies),
+    categorisedActual: penniesToMoney(categorisedPennies),
+    uncategorisedActual: penniesToMoney(uncategorisedPennies),
+    actual: penniesToMoney(totalActualPennies),
+    remaining: penniesToMoney(plannedPennies - totalActualPennies),
+    coveragePercent: eligibleGrossPennies > 0 ? Math.round((categorisedGrossPennies / eligibleGrossPennies) * 100) : 100,
+    uncategorisedTransactionIds
+  };
 }
 
 export function buildNextAction(state, now = new Date()) {
@@ -716,6 +823,35 @@ function csvCell(value) {
   let text = String(value ?? '');
   if (/^[=+\-@]/.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
+}
+
+function isBudgetTransactionActive(transaction) {
+  return !transaction.deletedAt
+    && transaction.ignored !== true
+    && transaction.valid !== false
+    && transaction.duplicateStatus !== 'exact';
+}
+
+function normaliseBudgetTreatment(value) {
+  const treatment = String(value || 'auto').trim().toLowerCase();
+  return ['auto', 'spending', 'refund', 'reversal', 'transfer', 'savings_transfer', 'debt_payment', 'ignored'].includes(treatment) ? treatment : 'auto';
+}
+
+function budgetContribution(transaction, pennies) {
+  return {
+    id: transaction.id,
+    date: transaction.date,
+    description: transaction.userDescription || transaction.description || 'Payment',
+    amount: penniesToMoney(pennies)
+  };
+}
+
+function moneyToPennies(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100);
+}
+
+function penniesToMoney(value) {
+  return Number(value || 0) / 100;
 }
 
 function normalise(value) {
