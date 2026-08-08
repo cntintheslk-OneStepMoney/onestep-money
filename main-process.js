@@ -8,6 +8,7 @@ import { FinanceDataStore } from './data-store.js';
 import { DiagnosticLogger, RENDERER_FAULT_EVENTS } from './diagnostic-logger.js';
 import { extractPdfDocument } from './pdf-service.js';
 import { parseImportedDocument } from './document-import.js';
+import { DocumentImportCoordinator } from './document-deduplication.js';
 import { askLocalModel, checkLocalModel } from './local-llm-service.js';
 import { SafeUpdateService } from './update-service.js';
 
@@ -22,6 +23,7 @@ let currentLoadResult;
 let diagnostics;
 let diagnosticPreviewCache;
 let updateService;
+let documentImportCoordinator;
 const pendingRestoreSelections = new Map();
 let activeRestore = null;
 
@@ -46,6 +48,13 @@ app.whenReady().then(async () => {
   await store.initialise();
   currentLoadResult = await store.loadState();
   currentState = currentLoadResult.status === 'normal' ? currentLoadResult.state : null;
+  documentImportCoordinator = new DocumentImportCoordinator({
+    store,
+    extractPdfDocument,
+    parseImportedDocument,
+    canonicalDocumentName,
+    recordFailure: (error, documentType, fileType) => diagnostics.record('DOCUMENT_IMPORT_FAILED', { error, documentType, fileType }).catch(() => ({ reference: 'IMP-101' }))
+  });
   registerVaultProtocol();
   registerIpcHandlers();
   createWindow();
@@ -134,6 +143,7 @@ function registerIpcHandlers() {
     try {
       if (!nextState || JSON.stringify(nextState).length > 25_000_000) throw new Error('The data update is invalid or too large.');
       currentState = await store.saveState(nextState);
+      documentImportCoordinator.reconcilePending(currentState);
       return currentState;
     } catch (error) {
       await diagnostics.record('STATE_SAVE_FAILED', { error }).catch(() => {});
@@ -168,36 +178,16 @@ function registerIpcHandlers() {
         : [{ name: 'Statements', extensions: ['pdf', 'csv', 'tsv', 'txt', 'qif', 'ofx', 'qfx', 'json'] }]
     });
     if (selection.canceled) return [];
-    await store.createAutomaticBackup('before-import');
-    const results = [];
-    for (const filePath of selection.filePaths) {
-      const extension = path.extname(filePath).toLowerCase();
-      let stored;
-      try {
-        stored = await store.storeDocument(filePath, kind, currentState.documents);
-        const document = stored.document;
-        const payload = extension === '.pdf' ? await extractPdfDocument(filePath) : await fs.readFile(filePath, 'utf8');
-        const preview = parseImportedDocument(path.basename(filePath), payload, kind, options.accountId || '');
-        preview.records = preview.records.map((record) => ({
-          ...record,
-          sourceDocumentId: document.id,
-          accounts: Array.isArray(record.accounts) ? record.accounts.map((account) => ({ ...account, sourceDocumentId: document.id })) : record.accounts
-        }));
-        document.displayName = canonicalDocumentName(document, preview, options.accountId, currentState);
-        document.parseStatus = preview.records.length ? (preview.reconciled ? 'ready' : 'review') : 'needs_review';
-        document.linkedRecordIds = preview.records.flatMap((record) => [record.id, ...(record.accounts || []).map((account) => account.id)]);
-        results.push({ document, duplicateDocument: stored.duplicate, preview });
-      } catch (error) {
-        const fault = await diagnostics.record('DOCUMENT_IMPORT_FAILED', { error, documentType: kind, fileType: extension }).catch(() => ({ reference: 'IMP-101' }));
-        const reason = `We couldn't read this ${kind === 'payslip' ? 'payslip' : 'bank statement'}. Error reference: ${fault.reference}.`;
-        if (!stored) throw new Error(reason);
-        stored.document.parseStatus = 'needs_review';
-        results.push({ document: stored.document, duplicateDocument: stored.duplicate, preview: { kind, records: [], rejected: [{ row: 0, reason }], warnings: [], summary: {}, reconciled: false, errorReference: fault.reference } });
+    return documentImportCoordinator.processSelection({
+      filePaths: selection.filePaths,
+      kind,
+      accountId: options.accountId || '',
+      getState: () => currentState,
+      saveState: async (nextState) => {
+        currentState = await store.saveState(nextState);
+        return currentState;
       }
-      if (stored && !stored.duplicate) currentState.documents.push(stored.document);
-    }
-    currentState = await store.saveState(currentState);
-    return results;
+    });
   });
 
   ipcMain.handle('document:open', async (_event, id) => {
@@ -228,8 +218,9 @@ function registerIpcHandlers() {
     if (blocked) return blocked;
     try {
       await store.createAutomaticBackup('before-document-delete');
+      const completedImport = currentState.importBatches.some((batch) => batch.documentId === id);
       await store.deleteDocument(id, currentState.documents);
-      currentState.documents = currentState.documents.filter((document) => document.id !== id);
+      if (!completedImport) currentState.documents = currentState.documents.filter((document) => document.id !== id);
       currentState = await store.saveState(currentState);
       return currentState;
     } catch (error) {
