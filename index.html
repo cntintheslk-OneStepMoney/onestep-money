@@ -109,6 +109,7 @@
             <label>Search<input id="transactionSearch" type="search" placeholder="Merchant, category or note" /></label>
             <label>Account<select id="transactionAccountFilter"><option value="all">All accounts</option></select></label>
             <label>Type<select id="transactionTypeFilter"><option value="all">All</option><option value="incoming">Incoming</option><option value="outgoing">Outgoing</option><option value="transfer">Transfers</option></select></label>
+            <label>Budget category<select id="transactionCategoryFilter"><option value="all">All categories</option><option value="uncategorised">Uncategorised</option></select></label>
           </div>
           <div class="table-wrap"><table><thead><tr><th>Date</th><th>Account</th><th>Description</th><th>Incoming</th><th>Outgoing</th><th>Balance</th><th>Notes</th><th><span class="sr-only">Edit</span></th></tr></thead><tbody id="transactionRows"></tbody></table></div>
           <p id="transactionCount" class="table-caption"></p>
@@ -135,7 +136,8 @@
 
         <section id="view-budget" class="view" hidden>
           <div class="section-actions"><div><h2>Simple monthly plan</h2><p>Dependable income first. Variable income stays separate until it arrives.</p></div><button class="primary-button" data-add="budget">Add budget item</button></div>
-          <article class="panel budget-summary"><div><span>Dependable income</span><strong id="budgetIncomeValue">£0.00</strong></div><div><span>Planned spending</span><strong id="plannedSpendingValue">£0.00</strong></div><div><span>Entered money left</span><strong id="budgetMarginValue">£0.00</strong></div></article>
+          <article class="panel budget-summary"><div><span>Dependable income</span><strong id="budgetIncomeValue">£0.00</strong></div><div><span>Planned</span><strong id="plannedSpendingValue">£0.00</strong></div><div><span>Spent</span><strong id="actualSpendingValue">£0.00</strong></div><div><span>Remaining plan</span><strong id="budgetRemainingValue">£0.00</strong></div></article>
+          <article id="uncategorisedBudgetNotice" class="panel budget-notice" hidden><div><strong><span id="uncategorisedBudgetValue">£0.00</span> needs categorising</strong><span id="budgetCoverageValue">100% of outgoing spending categorised</span></div><button id="reviewUncategorisedButton" class="secondary-button" type="button">Review payments</button></article>
           <div class="two-column budget-layout"><article class="panel"><h2>Plan versus actual</h2><div id="budgetRows" class="budget-list"></div></article><article class="panel"><h2>Penny-pinching ideas</h2><p class="muted">Based on your own imported spending. Review one item at a time.</p><div id="savingsIdeas" class="checks-list"></div></article></div>
         </section>
 

@@ -1,5 +1,5 @@
 import {
-  availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
+  availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
   findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn
 } from './finance-core.js';
@@ -78,6 +78,7 @@ function activateNormalMode(loaded) {
   }
   populateMonthOptions();
   populateAccountOptions();
+  populateBudgetCategoryOptions();
   render();
   checkModel();
 }
@@ -284,12 +285,17 @@ function bindEvents() {
     const saved = await window.financeAPI.exportCsv(exportTransactionsCsv(state.transactions));
     if (saved) showToast('Payments exported safely.');
   });
-  [byId('transactionSearch'), byId('transactionAccountFilter'), byId('transactionTypeFilter')].forEach((element) => element.addEventListener('input', renderTransactions));
+  [byId('transactionSearch'), byId('transactionAccountFilter'), byId('transactionTypeFilter'), byId('transactionCategoryFilter')].forEach((element) => element.addEventListener('input', renderTransactions));
   document.querySelectorAll('[data-add]').forEach((button) => button.addEventListener('click', () => openEditor(button.dataset.add)));
   byId('transactionRows').addEventListener('click', handleEditClick);
   byId('debtCards').addEventListener('click', handleEditClick);
   byId('overdraftCards').addEventListener('click', handleEditClick);
   byId('budgetRows').addEventListener('click', handleEditClick);
+  byId('reviewUncategorisedButton').addEventListener('click', () => {
+    byId('transactionCategoryFilter').value = 'uncategorised';
+    selectView('transactions');
+    renderTransactions();
+  });
   byId('payslipList').addEventListener('click', handleEditClick);
   byId('documentCards').addEventListener('click', handleDocumentClick);
   byId('accountCards').addEventListener('click', handleEditClick);
@@ -338,6 +344,7 @@ function selectView(name) {
 
 function render() {
   populateMonthOptions();
+  populateBudgetCategoryOptions();
   const month = state.settings.selectedMonth;
   const summary = calculatePeriodSummary(state, month);
   pendingAction = buildNextAction(state);
@@ -405,12 +412,18 @@ function renderTransactions() {
   const search = byId('transactionSearch').value.trim().toLowerCase();
   const account = byId('transactionAccountFilter').value;
   const type = byId('transactionTypeFilter').value;
+  const category = byId('transactionCategoryFilter').value;
   const accountNames = new Map(state.accounts.map((item) => [item.id, item.name]));
+  const budgetAnalysis = calculateBudgetAnalysis(state);
+  const budgetByTransaction = new Map();
+  for (const budget of budgetAnalysis.rows) for (const contribution of budget.contributions) budgetByTransaction.set(contribution.id, budget);
+  const uncategorised = new Set(budgetAnalysis.uncategorisedTransactionIds);
   const rows = state.transactions
     .filter((item) => String(item.budgetMonth || item.date).startsWith(state.settings.selectedMonth))
     .filter((item) => account === 'all' || item.accountId === account)
     .filter((item) => type === 'all' || (type === 'incoming' && item.incoming > 0) || (type === 'outgoing' && item.outgoing > 0) || (type === 'transfer' && item.transferStatus !== 'no'))
-    .filter((item) => !search || [item.description, item.userDescription, item.category, item.notes].join(' ').toLowerCase().includes(search))
+    .filter((item) => category === 'all' || (category === 'uncategorised' ? uncategorised.has(item.id) : budgetByTransaction.get(item.id)?.id === category))
+    .filter((item) => !search || [item.description, item.userDescription, budgetByTransaction.get(item.id)?.category, item.category, item.notes].join(' ').toLowerCase().includes(search))
     .sort((left, right) => left.date.localeCompare(right.date) || Number(left.sourceRow || 0) - Number(right.sourceRow || 0));
   const body = byId('transactionRows');
   clear(body);
@@ -424,7 +437,7 @@ function renderTransactions() {
     if (item.userDescription) description.append(element('span', '', item.description));
     const badges = document.createElement('span');
     badges.className = 'note-preview';
-    badges.textContent = item.category;
+    badges.textContent = budgetByTransaction.get(item.id)?.category || (uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
     if (item.transferStatus !== 'no') badges.textContent += ` · ${item.transferStatus} transfer`;
     description.append(badges);
     row.append(description);
@@ -536,21 +549,44 @@ function renderOverdrafts() {
 
 function renderBudget() {
   const summary = calculatePeriodSummary(state);
+  const analysis = calculateBudgetAnalysis(state);
   byId('budgetIncomeValue').textContent = formatCurrency(summary.dependableIncome);
-  byId('plannedSpendingValue').textContent = formatCurrency(summary.plannedSpending);
-  byId('budgetMarginValue').textContent = formatCurrency(summary.plannedMargin);
+  byId('plannedSpendingValue').textContent = formatCurrency(analysis.planned);
+  byId('actualSpendingValue').textContent = formatCurrency(analysis.actual);
+  byId('budgetRemainingValue').textContent = analysis.remaining < 0 ? `${formatCurrency(Math.abs(analysis.remaining))} over` : formatCurrency(analysis.remaining);
+  byId('budgetCoverageValue').textContent = `${analysis.coveragePercent}% of outgoing spending categorised`;
+  byId('uncategorisedBudgetValue').textContent = formatCurrency(analysis.uncategorisedActual);
+  byId('uncategorisedBudgetNotice').hidden = analysis.uncategorisedActual <= 0;
   const list = byId('budgetRows'); clear(list);
   if (!state.budgets.length) {
     const empty = element('div', 'empty-inline', 'No budget items yet. Add essentials first, then minimum debt payments.');
     list.append(empty);
   }
-  for (const item of calculateBudgetRows(state)) {
+  for (const item of analysis.rows) {
     const row = element('div', 'budget-item');
     const line = element('div', 'budget-line');
     const button = element('button', '', item.category); button.type = 'button'; button.dataset.edit = 'budget'; button.dataset.id = item.id;
-    append(line, button, element('span', '', `${formatCurrency(item.actual)} / ${formatCurrency(item.planned)}`));
-    const track = element('div', 'budget-bar'); const bar = document.createElement('span'); bar.style.width = `${Math.min(100, item.planned ? (item.actual / item.planned) * 100 : item.actual ? 100 : 0)}%`; track.append(bar);
-    append(row, line, track); list.append(row);
+    append(line, button, element('span', '', `${formatCurrency(item.actual)} spent of ${formatCurrency(item.planned)}`));
+    const status = item.actual < 0
+      ? `${formatCurrency(Math.abs(item.actual))} net refund`
+      : item.remaining < 0
+        ? `${formatCurrency(Math.abs(item.remaining))} over plan`
+        : item.remaining === 0 ? 'Budget used' : `${formatCurrency(item.remaining)} remaining`;
+    const track = element('div', `budget-bar${item.remaining < 0 ? ' over' : ''}`);
+    const bar = document.createElement('span'); bar.style.width = `${Math.min(100, item.progressPercent ?? (item.actual ? 100 : 0))}%`; track.append(bar);
+    append(row, line, element('span', 'budget-status', status), track);
+    if (item.contributions.length) {
+      const details = element('details', 'budget-contributions');
+      details.append(element('summary', '', `Why? ${item.contributions.length} payment${item.contributions.length === 1 ? '' : 's'}`));
+      const payments = element('div', 'budget-contribution-list');
+      for (const contribution of item.contributions) {
+        const payment = element('div', 'budget-contribution');
+        append(payment, element('span', '', `${formatDate(contribution.date)} · ${contribution.description}`), element('strong', contribution.amount < 0 ? 'incoming' : '', formatCurrency(contribution.amount)), actionButton('transaction', contribution.id, 'Edit'));
+        payments.append(payment);
+      }
+      details.append(payments); row.append(details);
+    }
+    list.append(row);
   }
   const ideas = byId('savingsIdeas'); clear(ideas);
   for (const item of findSavingsOpportunities(state).slice(0, 4)) {
@@ -922,10 +958,13 @@ function openEditor(type, id = '') {
   editorContext = { type, id };
   const collection = collectionFor(type);
   const item = id ? state[collection].find((entry) => entry.id === id) : null;
+  const editorItem = type === 'transaction' && item && !item.budgetCategoryId && item.categorySource !== 'manual'
+    ? { ...item, budgetCategoryId: legacyBudgetIdForTransaction(item) }
+    : item;
   byId('editEyebrow').textContent = item ? 'EDIT' : 'ADD';
   byId('editTitle').textContent = `${item ? 'Edit' : 'Add'} ${type === 'account' ? 'bank account' : type}`;
   const fields = byId('editFields'); clear(fields);
-  for (const definition of editorDefinitions(type)) fields.append(buildField(definition, item));
+  for (const definition of editorDefinitions(type)) fields.append(buildField(definition, editorItem));
   if (item) {
     const deleteButton = element('button', 'danger-button wide-field', `Delete ${type}`); deleteButton.type = 'button'; deleteButton.addEventListener('click', () => deleteEditedItem(type, id)); fields.append(deleteButton);
   }
@@ -943,8 +982,11 @@ function editorDefinitions(type) {
   if (type === 'transaction') return [
     ['accountId', 'Account', 'select', state.accounts.map((account) => [account.id, account.name])], ['date', 'Date', 'date'],
     ['description', 'Statement / payment description', 'text', 'Required', 'wide-field'], ['userDescription', 'Your description', 'text', 'Optional clearer name', 'wide-field'],
-    ['incoming', 'Incoming', 'number'], ['outgoing', 'Outgoing', 'number'], ['runningBalance', 'Running balance', 'number'], ['category', 'Category', 'text'],
-    ['transferStatus', 'Internal transfer', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']]], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
+    ['incoming', 'Incoming', 'number'], ['outgoing', 'Outgoing', 'number'], ['runningBalance', 'Running balance', 'number'],
+    ['budgetCategoryId', 'Budget category', 'select', [['','Uncategorised'], ...state.budgets.map((budget) => [budget.id, budget.category])]],
+    ['category', 'Statement category label', 'text'],
+    ['budgetTreatment', 'Budget treatment', 'select', [['auto','Automatic'],['spending','Spending'],['refund','Refund'],['reversal','Reversal'],['transfer','Internal transfer'],['savings_transfer','Savings transfer'],['debt_payment','Debt payment'],['ignored','Do not include']]],
+    ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']]], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
   if (type === 'payslip') return [['notes', 'Notes', 'textarea', '', 'wide-field']];
   if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']]], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
@@ -982,6 +1024,7 @@ async function saveEditor(event) {
   const { type, id } = editorContext;
   const collection = collectionFor(type);
   let item = id ? state[collection].find((entry) => entry.id === id) : null;
+  const previousBudgetCategory = type === 'budget' ? item?.category : '';
   if (!item) { item = { id: createId(type) }; state[collection].push(item); }
   for (const definition of editorDefinitions(type)) {
     const [name, , fieldType] = definition; const input = byId('editFields').querySelector(`[name="${name}"]`);
@@ -990,11 +1033,23 @@ async function saveEditor(event) {
     if (name === 'aprPercent') item.apr = value === null ? null : value / 100;
     else item[name] = value;
   }
-  if (type === 'transaction') { item.budgetMonth = item.date?.slice(0, 7) || state.settings.selectedMonth; item.source ||= 'manual'; item.cleared ??= true; item.incoming = Number(item.incoming || 0); item.outgoing = Number(item.outgoing || 0); }
+  if (type === 'transaction') {
+    item.budgetMonth = item.date?.slice(0, 7) || state.settings.selectedMonth;
+    item.source ||= 'manual'; item.cleared ??= true; item.incoming = Number(item.incoming || 0); item.outgoing = Number(item.outgoing || 0);
+    item.categorySource = 'manual';
+    const budget = state.budgets.find((entry) => entry.id === item.budgetCategoryId);
+    if (budget) item.category = budget.category;
+  }
+  if (type === 'budget' && previousBudgetCategory && previousBudgetCategory !== item.category) {
+    for (const transaction of state.transactions) {
+      if (!transaction.budgetCategoryId && transaction.categorySource !== 'manual' && normalisedText(transaction.category) === normalisedText(previousBudgetCategory)) transaction.budgetCategoryId = item.id;
+    }
+  }
   if (type === 'debt' || type === 'overdraft') { item.updatedAt = new Date().toISOString(); item.planPriority ??= 999; item.arrangementConfirmed = item.arrangementStatus === 'confirmed'; }
   if (type === 'account') { item.name ||= 'Unnamed account'; item.active ??= true; }
   await saveState();
   if (type === 'account') populateAccountOptions();
+  if (type === 'budget') populateBudgetCategoryOptions();
   if (type === 'transaction' || type === 'payslip') populateMonthOptions();
   byId('editDialog').close(); editorContext = null; render(); showToast('Saved.');
 }
@@ -1005,9 +1060,16 @@ async function deleteEditedItem(type, id) {
     return;
   }
   if (!window.confirm(`Delete this ${type}? This can be recovered only from a backup.`)) return;
+  if (type === 'budget') {
+    for (const transaction of state.transactions.filter((entry) => entry.budgetCategoryId === id)) {
+      transaction.budgetCategoryId = '';
+      transaction.categorySource = 'manual';
+    }
+  }
   const collection = collectionFor(type); state[collection] = state[collection].filter((item) => item.id !== id);
   await saveState();
   if (type === 'account') populateAccountOptions();
+  if (type === 'budget') populateBudgetCategoryOptions();
   byId('editDialog').close(); editorContext = null; render(); showToast('Deleted.');
 }
 
@@ -1350,6 +1412,30 @@ function populateAccountOptions() {
     for (const account of state.accounts.filter((item) => item.active !== false)) { const option = document.createElement('option'); option.value = account.id; option.textContent = account.name; select.append(option); }
   }
 }
+
+function populateBudgetCategoryOptions() {
+  const select = byId('transactionCategoryFilter');
+  if (!select) return;
+  const selected = select.value || 'all';
+  clear(select);
+  for (const [value, label] of [['all', 'All categories'], ['uncategorised', 'Uncategorised'], ...state.budgets.map((budget) => [budget.id, budget.category])]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option);
+  }
+  select.value = [...select.options].some((option) => option.value === selected) ? selected : 'all';
+}
+
+function legacyBudgetIdForTransaction(transaction) {
+  const category = normalisedText(transaction.category);
+  const description = normalisedText(transaction.description);
+  const matches = state.budgets.filter((budget) => {
+    const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalisedText);
+    const merchantTerms = (budget.merchantTerms || []).map(normalisedText).filter(Boolean);
+    return (category && categories.includes(category)) || (Number(transaction.outgoing || 0) > 0 && merchantTerms.some((term) => description.includes(term)));
+  });
+  return matches.length === 1 ? matches[0].id : '';
+}
+
+function normalisedText(value) { return String(value || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
 function collectionFor(type) { return ({ account: 'accounts', transaction: 'transactions', payslip: 'payslips', debt: 'debts', overdraft: 'overdrafts', budget: 'budgets' })[type]; }
 
