@@ -1654,7 +1654,7 @@ async function pathExists(target) {
 }
 
 async function syncFile(target) {
-  const handle = await fs.open(target, 'r');
+  const handle = await fs.open(target, 'r+');
   try {
     await handle.sync();
   } finally {
