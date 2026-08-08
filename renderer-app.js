@@ -1,7 +1,8 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, resolvePossibleDuplicate
+  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, removeBudgetCategory,
+  resolvePossibleDuplicate
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
@@ -571,8 +572,16 @@ function renderBudget() {
   for (const item of analysis.rows) {
     const row = element('div', 'budget-item');
     const line = element('div', 'budget-line');
-    const button = element('button', '', item.category); button.type = 'button'; button.dataset.edit = 'budget'; button.dataset.id = item.id;
-    append(line, button, element('span', '', `${formatCurrency(item.actual)} spent of ${formatCurrency(item.planned)}`));
+    const summary = element('div', 'budget-line-summary');
+    append(summary, element('strong', 'budget-category-name', item.category), element('span', '', `${formatCurrency(item.actual)} spent of ${formatCurrency(item.planned)}`));
+    const actions = element('div', 'budget-item-actions');
+    const edit = actionButton('budget', item.id, 'Edit');
+    edit.setAttribute('aria-label', `Edit ${item.category} budget`);
+    const remove = element('button', 'budget-remove-button', 'Remove');
+    remove.type = 'button'; remove.dataset.budgetRemove = item.id;
+    remove.setAttribute('aria-label', `Remove ${item.category} from budget`);
+    append(actions, edit, remove);
+    append(line, summary, actions);
     const status = item.actual < 0
       ? `${formatCurrency(Math.abs(item.actual))} net refund`
       : item.remaining < 0
@@ -956,6 +965,11 @@ async function animateFocusPanel(className, duration) {
 }
 
 async function handleEditClick(event) {
+  const budgetRemove = event.target.closest('[data-budget-remove]');
+  if (budgetRemove) {
+    await removeBudgetItem(budgetRemove.dataset.budgetRemove);
+    return;
+  }
   const review = event.target.closest('[data-duplicate-review]');
   if (review) {
     const decision = review.dataset.duplicateReview;
@@ -1072,22 +1086,39 @@ async function saveEditor(event) {
 }
 
 async function deleteEditedItem(type, id) {
+  if (type === 'budget') {
+    await removeBudgetItem(id, true);
+    return;
+  }
   if (type === 'account' && (state.transactions.some((item) => item.accountId === id) || state.overdrafts.some((item) => item.accountId === id))) {
     window.alert('This account is linked to payments or an overdraft. Mark it as archived instead.');
     return;
   }
   if (!window.confirm(`Delete this ${type}? This can be recovered only from a backup.`)) return;
-  if (type === 'budget') {
-    for (const transaction of state.transactions.filter((entry) => entry.budgetCategoryId === id)) {
-      transaction.budgetCategoryId = '';
-      transaction.categorySource = 'manual';
-    }
-  }
   const collection = collectionFor(type); state[collection] = state[collection].filter((item) => item.id !== id);
   await saveState();
   if (type === 'account') populateAccountOptions();
   if (type === 'budget') populateBudgetCategoryOptions();
   byId('editDialog').close(); editorContext = null; render(); showToast('Deleted.');
+}
+
+async function removeBudgetItem(id, closeEditor = false) {
+  const budget = state.budgets.find((item) => item.id === id);
+  if (!budget) {
+    showToast('That budget category is no longer available.');
+    return;
+  }
+  const linkedCount = state.transactions.filter((transaction) => transaction.budgetCategoryId === id).length;
+  const linkedMessage = linkedCount
+    ? ` ${linkedCount} linked payment${linkedCount === 1 ? '' : 's'} will remain and become uncategorised.`
+    : '';
+  if (!window.confirm(`Remove ${budget.category} from your budget?${linkedMessage}`)) return;
+  await saveState(removeBudgetCategory(state, id));
+  populateBudgetCategoryOptions();
+  if (closeEditor && byId('editDialog').open) byId('editDialog').close();
+  editorContext = closeEditor ? null : editorContext;
+  render();
+  showToast(`${budget.category} was removed from your budget.`);
 }
 
 async function handleDocumentClick(event) {

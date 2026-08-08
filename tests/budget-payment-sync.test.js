@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   calculateBudgetAnalysis, calculateBudgetRows, calculatePeriodSummary, findSavingsOpportunities,
-  isTransactionFinanciallyActive, resolvePossibleDuplicate
+  isTransactionFinanciallyActive, removeBudgetCategory, resolvePossibleDuplicate
 } from '../finance-core.js';
 import { financialSnapshot } from '../local-llm-service.js';
 
@@ -196,11 +197,27 @@ test('stable budget identifiers preserve relationships across a category rename'
 });
 
 test('a deleted category leaves its transaction intact and explicitly uncategorised', () => {
-  const transaction = outgoing('preserved', 45, { category: 'Old category', budgetCategoryId: '', categorySource: 'manual' });
-  const analysis = calculateBudgetAnalysis(state({ budgets: [], transactions: [transaction] }));
+  const input = state({ transactions: [outgoing('preserved', 45, { category: 'Groceries', budgetCategoryId: 'groceries', categorySource: 'manual' })] });
+  const removed = removeBudgetCategory(input, 'groceries');
+  const analysis = calculateBudgetAnalysis(removed);
   assert.equal(analysis.rows.length, 0);
   assert.equal(analysis.uncategorisedActual, 45);
-  assert.equal(transaction.outgoing, 45);
+  assert.equal(removed.transactions[0].outgoing, 45);
+  assert.equal(removed.transactions[0].budgetCategoryId, '');
+  assert.equal(removed.transactions[0].categorySource, 'manual');
+  assert.equal(input.budgets.length, 1);
+  assert.equal(input.transactions[0].budgetCategoryId, 'groceries');
+});
+
+test('budget rows expose clear accessible edit and remove controls', () => {
+  const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+  const styles = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(renderer, /actionButton\('budget', item\.id, 'Edit'\)/);
+  assert.match(renderer, /dataset\.budgetRemove = item\.id/);
+  assert.match(renderer, /Edit \$\{item\.category\} budget/);
+  assert.match(renderer, /Remove \$\{item\.category\} from budget/);
+  assert.match(styles, /\.budget-item-actions\s*\{[^}]*display: flex/);
+  assert.match(styles, /\.budget-remove-button\s*\{/);
 });
 
 test('edited amount, date and planned amount are derived without cached actuals', () => {
