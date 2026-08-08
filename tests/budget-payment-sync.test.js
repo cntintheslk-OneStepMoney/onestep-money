@@ -42,6 +42,43 @@ test('overspending is retained above 100 percent and reported as a negative rema
   assert.equal(analysis.rows[0].progressPercent, 130);
 });
 
+test('budget plan versus actual rows sort from highest percentage used to lowest', () => {
+  const input = state({
+    budgets: [
+      { id: 'unused', category: 'Unused', planned: 100 },
+      { id: 'quarter-used', category: 'Quarter used', planned: 200 },
+      { id: 'mostly-used', category: 'Mostly used', planned: 100 },
+      { id: 'over-budget', category: 'Over budget', planned: 100 }
+    ],
+    transactions: [
+      outgoing('quarter-payment', 50, { budgetCategoryId: 'quarter-used', categorySource: 'manual' }),
+      outgoing('mostly-payment', 90, { budgetCategoryId: 'mostly-used', categorySource: 'manual' }),
+      outgoing('over-payment', 130, { budgetCategoryId: 'over-budget', categorySource: 'manual' })
+    ]
+  });
+
+  const rows = calculateBudgetRows(input);
+  assert.deepEqual(rows.map((row) => row.id), ['over-budget', 'mostly-used', 'quarter-used', 'unused']);
+  assert.deepEqual(rows.map((row) => row.progressPercent), [130, 90, 25, 0]);
+});
+
+test('spending against a zero plan is prioritised above percentage-based rows', () => {
+  const input = state({
+    budgets: [
+      { id: 'over-budget', category: 'Over budget', planned: 100 },
+      { id: 'unplanned', category: 'Unplanned', planned: 0 }
+    ],
+    transactions: [
+      outgoing('over-payment', 150, { budgetCategoryId: 'over-budget', categorySource: 'manual' }),
+      outgoing('unplanned-payment', 10, { budgetCategoryId: 'unplanned', categorySource: 'manual' })
+    ]
+  });
+
+  const rows = calculateBudgetRows(input);
+  assert.deepEqual(rows.map((row) => row.id), ['unplanned', 'over-budget']);
+  assert.equal(rows[0].progressPercent, null);
+});
+
 test('confirmed internal transfers and explicit savings transfers do not count as spending', () => {
   const input = state({ transactions: [
     outgoing('transfer-out', 300, { transferStatus: 'confirmed', category: 'Groceries' }),
