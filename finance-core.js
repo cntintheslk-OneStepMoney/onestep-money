@@ -20,6 +20,20 @@ export function createId(prefix = 'item') {
   return `${prefix}-${id}`;
 }
 
+export function availableReportingMonths(state = {}, fallbackMonth = state.settings?.selectedMonth || currentMonth()) {
+  const months = new Set();
+  for (const transaction of state.transactions || []) {
+    const month = reportingMonth(transaction.budgetMonth) || reportingMonth(transaction.date);
+    if (month) months.add(month);
+  }
+  for (const payslip of state.payslips || []) {
+    const month = reportingMonth(payslip.period) || reportingMonth(payslip.payDate);
+    if (month) months.add(month);
+  }
+  if (months.size) return [...months].sort().reverse();
+  return [reportingMonth(fallbackMonth) || currentMonth()];
+}
+
 export function periodTransactions(transactions, month) {
   return (transactions || []).filter((transaction) => String(transaction.budgetMonth || transaction.date || '').slice(0, 7) === month);
 }
@@ -238,6 +252,11 @@ function isBlankState(state) {
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function reportingMonth(value) {
+  const month = String(value || '').slice(0, 7);
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '';
 }
 
 function exactTransactionKey(item) {
