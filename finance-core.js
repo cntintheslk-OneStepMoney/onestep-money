@@ -264,14 +264,47 @@ export function debtSafetyAssessment(state, extraPayment = state.settings?.extra
 export function findDuplicateCandidates(existing, incoming) {
   const exact = [];
   const possible = [];
-  const exactMap = new Map((existing || []).map((item) => [exactTransactionKey(item), item]));
+  const usedExisting = new Set();
   for (const item of incoming || []) {
-    const key = exactTransactionKey(item);
-    if (exactMap.has(key)) { exact.push({ incoming: item, existing: exactMap.get(key) }); continue; }
-    const candidate = (existing || []).find((other) => other.accountId === item.accountId && other.date === item.date && roundMoney(other.incoming) === roundMoney(item.incoming) && roundMoney(other.outgoing) === roundMoney(item.outgoing));
+    const providerId = String(item.providerTransactionId || '').trim();
+    const providerMatch = providerId && (existing || []).find((other) => !usedExisting.has(other.id)
+      && other.accountId === item.accountId && String(other.providerTransactionId || '').trim() === providerId);
+    const identityMatch = providerMatch || (existing || []).find((other) => !usedExisting.has(other.id)
+      && exactTransactionKey(other) === exactTransactionKey(item) && compatibleRunningBalance(other, item));
+    if (identityMatch) {
+      usedExisting.add(identityMatch.id);
+      exact.push({ incoming: item, existing: identityMatch, evidence: providerMatch ? 'provider-id' : 'transaction-identity' });
+      continue;
+    }
+    const candidate = (existing || []).find((other) => possibleTransactionMatch(other, item));
     if (candidate) possible.push({ incoming: item, existing: candidate });
   }
   return { exact, possible };
+}
+
+export function matchStatementAccount(accounts = [], preview = {}) {
+  const identity = preview.accountIdentity || preview.summary || {};
+  const selected = accounts.find((account) => account.id === preview.accountHint);
+  if (selected) {
+    const conflicts = accountIdentityConflicts(selected, identity);
+    return conflicts.length
+      ? { status: 'conflict', account: selected, candidates: [selected], conflicts, confidence: 'review' }
+      : { status: 'matched', account: selected, candidates: [selected], conflicts: [], confidence: 'user-selected' };
+  }
+
+  const reference = referenceKey(identity.accountReference);
+  const institution = accountMatchKey(identity.institution);
+  const type = accountTypeKey(identity.accountType);
+  const candidates = accounts.filter((account) => {
+    const accountReference = referenceKey(account.accountReference);
+    if (!reference || !accountReference || reference !== accountReference) return false;
+    if (institution && account.institution && institution !== accountMatchKey(account.institution)) return false;
+    if (type && account.type && type !== accountTypeKey(account.type)) return false;
+    return true;
+  });
+  if (candidates.length === 1) return { status: 'matched', account: candidates[0], candidates, conflicts: [], confidence: 'strong-identity' };
+  if (candidates.length > 1) return { status: 'ambiguous', account: null, candidates, conflicts: [], confidence: 'review' };
+  return { status: 'unmatched', account: null, candidates: [], conflicts: [], confidence: 'review' };
 }
 
 export function planCreditReportAccounts(debts = [], overdrafts = [], accounts = []) {
@@ -306,10 +339,16 @@ export function creditReportStatusConflict(value) {
 export function syncStatementAccount(state, account, preview, documentId = '') {
   const closingBalance = Number(preview?.summary?.closingBalance);
   if (!account || !preview?.reconciled || !Number.isFinite(closingBalance)) return '';
+  const statementDate = preview.summary.statementEndDate
+    || (preview.records || []).map((item) => item.date).filter(Boolean).sort().at(-1)
+    || '';
+  if (!statementDate) return '';
+  if (account.statementDate && account.statementDate > statementDate) return 'historical-only';
   account.currentBalance = closingBalance;
-  account.statementDate = (preview.records || []).map((item) => item.date).filter(Boolean).sort().at(-1) || account.statementDate;
+  account.statementDate = statementDate;
   if (!Number.isFinite(account.openingBalance) && Number.isFinite(preview.summary.openingBalance)) account.openingBalance = preview.summary.openingBalance;
-  if (!account.institution && preview.institution) account.institution = preview.institution;
+  if (!account.institution && (preview.institution || preview.accountIdentity?.institution)) account.institution = preview.institution || preview.accountIdentity.institution;
+  if (!account.accountReference && preview.accountIdentity?.accountReference) account.accountReference = preview.accountIdentity.accountReference;
 
   const used = Math.max(0, -closingBalance);
   let overdraft = (state.overdrafts || []).find((item) => item.accountId === account.id);
@@ -352,17 +391,57 @@ export function syncStatementAccount(state, account, preview, documentId = '') {
   return action === 'overdraft-created' ? action : 'overdraft-updated';
 }
 
-export function matchInternalTransfers(transactions) {
+export function matchInternalTransfers(transactions, accounts = []) {
   const credits = transactions.filter((item) => item.incoming > 0 && item.transferStatus !== 'confirmed');
   const matches = [];
+  const usedCredits = new Set();
   for (const debit of transactions.filter((item) => item.outgoing > 0 && item.transferStatus !== 'confirmed')) {
-    const credit = credits.find((item) => item.accountId !== debit.accountId && Math.abs(item.incoming - debit.outgoing) < 0.01 && Math.abs(dateDistance(item.date, debit.date)) <= 2);
+    const candidates = credits.filter((item) => !usedCredits.has(item.id) && item.accountId !== debit.accountId
+      && Math.abs(item.incoming - debit.outgoing) < 0.01 && Math.abs(dateDistance(item.date, debit.date)) <= 2);
+    if (candidates.length !== 1) continue;
+    const [credit] = candidates;
     if (credit) {
       const descriptions = `${normalise(debit.description)} ${normalise(credit.description)}`;
-      matches.push({ debitId: debit.id, creditId: credit.id, amount: debit.outgoing, confidence: /own account|internal transfer|account transfer/.test(descriptions) ? 'likely' : 'possible' });
+      const transferSignal = /own account|internal transfer|account transfer|transfer to|transfer from/.test(descriptions);
+      const referenceSignal = sharedTransferReference(debit, credit);
+      const accountSignal = descriptionsReferenceAccounts(descriptions, debit, credit, accounts);
+      const confidence = transferSignal && (referenceSignal || accountSignal) ? 'confirmed' : transferSignal ? 'likely' : 'possible';
+      usedCredits.add(credit.id);
+      matches.push({ debitId: debit.id, creditId: credit.id, amount: debit.outgoing, confidence, evidence: { transferSignal, referenceSignal, accountSignal } });
     }
   }
   return matches;
+}
+
+export function normaliseMerchantDescription(value) {
+  return normalise(value)
+    .replace(/\b(?:card|visa|mastercard|debit|credit|contactless|faster payment|faster payments|direct debit|standing order|bacs|fps|fpi|fpo)\b/g, ' ')
+    .replace(/\b\d{4,}\b/g, ' ')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function detectRecurringTransactions(history = [], candidates = []) {
+  const all = [...history, ...candidates];
+  const unique = [...new Map(all.map((item) => [item.id, item])).values()];
+  const observations = [];
+  for (const candidate of candidates) {
+    const merchantKey = normaliseMerchantDescription(candidate.description);
+    const direction = candidate.incoming > 0 ? 'incoming' : candidate.outgoing > 0 ? 'outgoing' : '';
+    if (!merchantKey || !direction || !candidate.date) continue;
+    const related = unique.filter((item) => item.accountId === candidate.accountId && item.date
+      && normaliseMerchantDescription(item.description) === merchantKey
+      && (item.incoming > 0 ? 'incoming' : item.outgoing > 0 ? 'outgoing' : '') === direction)
+      .sort((left, right) => left.date.localeCompare(right.date));
+    const dates = [...new Set(related.map((item) => item.date))];
+    const cadence = recurringCadence(dates);
+    if (!cadence) continue;
+    const confidence = dates.length >= 3 ? 'confirmed' : 'likely';
+    observations.push({ transactionId: candidate.id, merchantKey, direction, cadence, confidence, occurrences: dates.length });
+  }
+  return observations;
 }
 
 export function exportTransactionsCsv(transactions) {
@@ -563,7 +642,74 @@ function reportingMonth(value) {
 }
 
 function exactTransactionKey(item) {
-  return [item.accountId, item.date, roundMoney(item.incoming), roundMoney(item.outgoing), normalise(item.description), item.sourceRow || ''].join('|');
+  return [item.accountId, item.date, roundMoney(item.incoming), roundMoney(item.outgoing), normalise(item.description), normalise(item.reference)].join('|');
+}
+
+function possibleTransactionMatch(left, right) {
+  return left.accountId === right.accountId && left.date === right.date
+    && roundMoney(left.incoming) === roundMoney(right.incoming)
+    && roundMoney(left.outgoing) === roundMoney(right.outgoing);
+}
+
+function compatibleRunningBalance(left, right) {
+  const leftBalance = Number(left.runningBalance);
+  const rightBalance = Number(right.runningBalance);
+  if (!Number.isFinite(leftBalance) || !Number.isFinite(rightBalance)) return true;
+  return roundMoney(leftBalance) === roundMoney(rightBalance);
+}
+
+function accountIdentityConflicts(account, identity) {
+  const conflicts = [];
+  const identityReference = referenceKey(identity.accountReference);
+  const accountReference = referenceKey(account.accountReference);
+  if (identityReference && accountReference && identityReference !== accountReference) conflicts.push('account_reference');
+  const identityInstitution = accountMatchKey(identity.institution);
+  const accountInstitution = accountMatchKey(account.institution);
+  if (identityInstitution && accountInstitution && identityInstitution !== accountInstitution) conflicts.push('institution');
+  const identityType = accountTypeKey(identity.accountType);
+  const accountType = accountTypeKey(account.type);
+  if (identityType && accountType && identityType !== accountType) conflicts.push('account_type');
+  return conflicts;
+}
+
+function accountTypeKey(value) {
+  const key = normalise(value).replace(/\baccount\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  if (/\b(?:checking|current)\b/.test(key)) return 'current';
+  if (/\b(?:saving|savings|deposit)\b/.test(key)) return 'savings';
+  return key;
+}
+
+function sharedTransferReference(left, right) {
+  const leftTokens = transferReferenceTokens(`${left.reference || ''} ${left.description || ''}`);
+  const rightTokens = transferReferenceTokens(`${right.reference || ''} ${right.description || ''}`);
+  return [...leftTokens].some((token) => rightTokens.has(token));
+}
+
+function transferReferenceTokens(value) {
+  const ignored = new Set(['transfer', 'account', 'internal', 'payment', 'faster', 'from', 'into', 'own']);
+  return new Set(normalise(value).split(/[^a-z0-9]+/).filter((token) => token.length >= 4 && !ignored.has(token) && !/^\d+$/.test(token)));
+}
+
+function descriptionsReferenceAccounts(descriptions, debit, credit, accounts) {
+  const debitAccount = accounts.find((account) => account.id === debit.accountId);
+  const creditAccount = accounts.find((account) => account.id === credit.accountId);
+  const debitKeys = [debitAccount?.name, debitAccount?.institution, referenceKey(debitAccount?.accountReference)].map(accountMatchKey).filter(Boolean);
+  const creditKeys = [creditAccount?.name, creditAccount?.institution, referenceKey(creditAccount?.accountReference)].map(accountMatchKey).filter(Boolean);
+  return [...debitKeys, ...creditKeys].some((key) => key.length >= 3 && descriptions.includes(key));
+}
+
+function recurringCadence(dates) {
+  if (dates.length < 2) return '';
+  const intervals = dates.slice(1).map((date, index) => Math.abs(dateDistance(date, dates[index])));
+  const cadenceRules = [
+    ['weekly', 6, 8],
+    ['fortnightly', 13, 15],
+    ['four-weekly', 27, 29],
+    ['monthly', 26, 35],
+    ['quarterly', 80, 100],
+    ['annual', 350, 380]
+  ];
+  return cadenceRules.find(([, minimum, maximum]) => intervals.every((days) => days >= minimum && days <= maximum))?.[0] || '';
 }
 
 function csvCell(value) {
