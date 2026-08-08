@@ -176,6 +176,7 @@ tr:last-child td { border-bottom: 0; }
 .import-summary div { background: #f7f6f2; border-radius: 11px; padding: 0.72rem; display: grid; gap: 0.2rem; }
 .import-summary span { color: var(--muted); font-size: 0.72rem; }
 .preview-table { max-height: 390px; margin-top: 0.8rem; }
+.diagnostic-preview { max-height: 420px; overflow: auto; margin: 0.8rem 0 0; border: 1px solid var(--line); border-radius: 12px; background: #111820; color: #dce3ec; padding: 1rem; font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .toast { position: fixed; right: 1.2rem; bottom: 1.2rem; z-index: 10; max-width: 380px; color: #fff; background: var(--dark-soft); border-radius: 12px; padding: 0.8rem 1rem; box-shadow: var(--shadow); }
 
 @media (max-width: 1080px) {

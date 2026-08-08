@@ -10,7 +10,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 
 export class FinanceDataStore {
-  constructor(userDataPath, seedPath) {
+  constructor(userDataPath, seedPath, diagnostics = null) {
     this.userDataPath = userDataPath;
     this.seedPath = seedPath;
     this.statePath = path.join(userDataPath, STATE_FILE);
@@ -18,6 +18,7 @@ export class FinanceDataStore {
     this.backupPath = path.join(userDataPath, 'automatic-backups');
     this.keyPath = path.join(userDataPath, KEY_FILE);
     this.vaultKey = null;
+    this.diagnostics = diagnostics;
   }
 
   async initialise() {
@@ -43,6 +44,7 @@ export class FinanceDataStore {
       return migrateState(state);
     } catch (error) {
       if (error.code !== 'ENOENT') {
+        await this.diagnostics?.record('STATE_LOAD_RECOVERED', { error }).catch(() => {});
         await this.createAutomaticBackup('unreadable-state').catch(() => {});
       }
       const seed = JSON.parse(await fs.readFile(this.seedPath, 'utf8'));

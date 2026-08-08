@@ -39,6 +39,7 @@
     "asar": true,
     "files": [
       "data-store.js",
+      "diagnostic-logger.js",
       "assets/**",
       "build/icon.ico",
       "document-import.js",
