@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   recordRendererFault: (eventName) => ipcRenderer.invoke('diagnostics:renderer-fault', eventName),
   getUpdateStatus: () => ipcRenderer.invoke('update:get-status'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadAvailableUpdate: () => ipcRenderer.invoke('update:download'),
+  restartAndInstallUpdate: () => ipcRenderer.invoke('update:restart-and-install'),
   openAvailableUpdate: () => ipcRenderer.invoke('update:open-release'),
   onUpdateStatus: (callback) => {
     const listener = (_event, status) => callback(status);
