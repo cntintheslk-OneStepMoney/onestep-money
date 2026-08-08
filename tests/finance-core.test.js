@@ -108,8 +108,8 @@ test('transfer matching requires different accounts, equal values and nearby dat
 
 test('payoff model visibly blocks overpayments while an overdraft arrangement is unresolved', () => {
   const state = baseState();
-  state.debts = [{ id: 'd', name: 'Card', currentBalance: 500, apr: null, contractualPayment: 25, status: 'current', arrangementConfirmed: true, includeInPlan: true, planPriority: 2 }];
-  state.overdrafts = [{ id: 'o', name: 'Bank overdraft', currentBalance: 200, apr: 0.399, contractualPayment: 0, status: 'over_limit', arrangementConfirmed: false, includeInPlan: true, planPriority: 1 }];
+  state.debts = [{ id: 'd', name: 'Card', type: 'Credit card', creditLimit: 1000, currentBalance: 500, apr: null, contractualPayment: 25, status: 'current', arrangementStatus: 'none', arrangementConfirmed: false, includeInPlan: true, planPriority: 2 }];
+  state.overdrafts = [{ id: 'o', name: 'Bank overdraft', currentBalance: 200, limit: 100, apr: 0.399, contractualPayment: 0, status: 'over_limit', arrangementStatus: 'unknown', arrangementConfirmed: false, includeInPlan: true, planPriority: 1 }];
   const plan = debtPlan(state, 'hybrid', 100, '2025-02');
   assert.equal(plan.safeToOverpay, false);
   assert.deepEqual(plan.blockers, ['Bank overdraft']);

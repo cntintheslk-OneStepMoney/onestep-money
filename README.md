@@ -14,7 +14,8 @@ New installations start completely blank. This repository contains no personal a
 - Imports bank statements with a review step before saving records.
 - Synchronises reconciled statement balances and keeps linked overdraft usage up to date automatically.
 - Imports PDF credit reports, updates matched borrowing and adds newly reported debts or overdrafts without duplicating tracked accounts.
-- Separates debts from overdrafts while comparing both safely in payoff forecasts.
+- Separates debts from overdrafts while applying one shared safety assessment to payoff forecasts, generated actions and local guidance.
+- Protects required payments and confirmed arrangements before considering an optional debt payment.
 - Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips.
 - Stores imported originals in an encrypted local document vault.
 - Adds notes and clearer descriptions to accounts, payments, debts and overdrafts.
@@ -47,6 +48,15 @@ Credit reports:
 - Positive unmatched balances are added automatically after the import review; matched debts are updated and zero-balance untracked accounts are not created
 
 Unrecognised layouts are rejected visibly. Invalid dates and amounts are never silently replaced with zero or today's date, and PDF imports that do not reconcile are marked for review.
+
+## Financial-safety model
+
+- Debt status and payment-arrangement status can remain explicitly unknown; missing information is never converted into a positive safety assertion.
+- Defaulted debts and accounts in arrears are excluded from discretionary overpayments unless later, separate logic can establish that a different action is safe.
+- Confirmed arrangement payments are treated as required commitments and are not automatically increased.
+- Accounts above a known credit or overdraft limit receive priority over ordinary eligible debts, while essential commitments and cash availability remain protected.
+- Conflicting tracked and imported statuses use the more cautious state and create an information-checking action.
+- The optional-payment amount is capped by dependable income after budgets, unbudgeted required debt payments, scheduled commitments and the selected starter buffer. A known current-account balance can reduce that cap further so OneStep does not recommend borrowing the payment back.
 
 ## Privacy model
 

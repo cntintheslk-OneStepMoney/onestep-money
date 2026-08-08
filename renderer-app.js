@@ -1,7 +1,7 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  creditReportDebtStatus, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
+  creditReportDebtStatus, creditReportStatusConflict, findDuplicateCandidates, findSavingsOpportunities, formatCurrency, formatDate,
   hasCompletedCheckIn, planCreditReportAccounts, syncStatementAccount
 } from './finance-core.js';
 
@@ -472,9 +472,26 @@ function renderDebts() {
   }
   const plan = debtPlan(state, 'hybrid');
   const planCard = element('article', `check-card ${plan.safeToOverpay ? 'positive' : 'warning'}`);
-  append(planCard, element('h3', '', plan.safeToOverpay ? 'Hybrid payoff forecast' : 'Forecast paused for safety'), element('p', '', plan.safeToOverpay ? `${formatCurrency(plan.monthlyPot)} a month gives a provisional debt-free month of ${monthLabel(plan.debtFreeMonth)}. ${plan.unknownApr.length} unknown APRs could change this.` : `Confirm arrangements for ${plan.blockers.join(' and ')} before treating the ${formatCurrency(state.settings.extraDebtPayment)} target as safe.`));
+  const planTitle = ({ safe: 'Hybrid payoff forecast', reduced: 'Extra payment reduced for safety', blocked: 'Forecast paused for safety', not_requested: 'Required-payment forecast' })[plan.overpaymentStatus] || 'Forecast paused for safety';
+  const planText = plan.overpaymentStatus === 'safe'
+    ? `${formatCurrency(plan.monthlyPot)} a month includes the checked extra payment and gives a provisional debt-free month of ${monthLabel(plan.debtFreeMonth)}. ${plan.unknownApr.length} unknown APRs could change this.`
+    : plan.overpaymentStatus === 'reduced'
+      ? `OneStep reduced the optional payment to ${formatCurrency(plan.safeExtraPayment)}. The forecast protects the commitments currently recorded.`
+      : plan.overpaymentStatus === 'not_requested'
+        ? `${formatCurrency(plan.minimumTotal)} a month covers the required payments currently recorded. No optional payment is included.`
+        : plan.explanations[0] || 'We do not have enough information to recommend an extra payment safely.';
+  append(planCard, element('h3', '', planTitle), element('p', '', planText));
+  const whyItems = [...plan.explanations, ...plan.excludedAccounts.map((item) => `${item.name}: ${item.reason}`)].filter(Boolean);
+  if (whyItems.length) {
+    const why = element('details', 'plan-why');
+    why.append(element('summary', '', 'Why?'));
+    const list = element('ul');
+    for (const explanation of [...new Set(whyItems)]) list.append(element('li', '', explanation));
+    why.append(list);
+    planCard.append(why);
+  }
   container.append(planCard);
-  for (const item of state.debts) container.append(entityCard('debt', item, [stat('Balance', formatCurrency(item.currentBalance)), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`), stat('Payment', item.contractualPayment ? formatCurrency(item.contractualPayment) : 'Unknown', true)]));
+  for (const item of state.debts) container.append(entityCard('debt', item, [stat('Balance', formatCurrency(item.currentBalance)), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`), stat('Required / arrangement', paymentStatusLabel(item), true)]));
 }
 
 function renderCreditReports() {
@@ -495,7 +512,7 @@ function renderOverdrafts() {
   const total = state.overdrafts.reduce((sum, item) => sum + Number(item.currentBalance || 0), 0);
   byId('overdraftTotalValue').textContent = formatCurrency(total);
   byId('overLimitCount').textContent = state.overdrafts.filter((item) => item.status === 'over_limit').length;
-  byId('overdraftPlansValue').textContent = `${state.overdrafts.filter((item) => item.arrangementConfirmed).length} / ${state.overdrafts.length}`;
+  byId('overdraftPlansValue').textContent = `${state.overdrafts.filter((item) => item.arrangementStatus === 'confirmed').length} / ${state.overdrafts.length}`;
   const container = byId('overdraftCards'); clear(container);
   if (!state.overdrafts.length) {
     const empty = element('article', 'panel');
@@ -503,7 +520,7 @@ function renderOverdrafts() {
     container.append(empty);
     return;
   }
-  for (const item of state.overdrafts) container.append(entityCard('overdraft', item, [stat('Used', formatCurrency(item.currentBalance)), stat('Limit', item.limit ? formatCurrency(item.limit) : 'Unknown'), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`, true)]));
+  for (const item of state.overdrafts) container.append(entityCard('overdraft', item, [stat('Used', formatCurrency(item.currentBalance)), stat('Limit / APR', limitAprLabel(item)), stat('Required / arrangement', paymentStatusLabel(item), true)]));
 }
 
 function renderBudget() {
@@ -722,6 +739,10 @@ function applyCreditReportPlan(report, plan) {
       status: creditReportDebtStatus(account.status),
       includeInPlan: true,
       arrangementConfirmed: false,
+      arrangementStatus: 'unknown',
+      arrangementPayment: null,
+      arrearsAmount: null,
+      statusConflict: creditReportStatusConflict(account.status),
       interestFrozen: false,
       planPriority: 999,
       accountReference: account.accountReference || '',
@@ -756,7 +777,10 @@ function applyReportedAccountFields(existing, account, report) {
   if (account.accountReference) existing.accountReference = account.accountReference;
   if (account.status) {
     existing.reportedStatus = account.status;
-    existing.status = creditReportDebtStatus(account.status);
+    const reportedStatus = creditReportDebtStatus(account.status);
+    const previousStatus = existing.status || 'unknown';
+    existing.statusConflict = Boolean(existing.statusConflict) || creditReportStatusConflict(account.status) || (reportedStatus !== 'unknown' && previousStatus !== 'unknown' && previousStatus !== reportedStatus);
+    if (previousStatus === 'unknown' && reportedStatus !== 'unknown') existing.status = reportedStatus;
   }
   existing.lastReportedAt = account.updatedDate || report.reportDate || existing.lastReportedAt || '';
   existing.sourceCreditReportId = report.id;
@@ -873,7 +897,7 @@ function editorDefinitions(type) {
   ];
   if (type === 'payslip') return [['notes', 'Notes', 'textarea', '', 'wide-field']];
   if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']]], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
-  const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual payment','number'], ['status','Status','select',[['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['includeInPlan','Include in payoff plan','checkbox'], ['arrangementConfirmed','Payment arrangement confirmed','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
+  const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual / minimum payment','number'], ['arrearsAmount','Known arrears amount','number'], ['status','Status','select',[['unknown','Unknown'],['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['arrangementStatus','Payment arrangement','select',[['unknown','Unknown'],['none','Confirmed none'],['confirmed','Confirmed arrangement']]], ['arrangementPayment','Agreed arrangement payment','number'], ['includeInPlan','Include in payoff plan','checkbox'], ['statusConflict','Status information conflicts / needs checking','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
   if (type === 'overdraft') {
     base.splice(1, 0, ['accountId', 'Linked account', 'select', [['','Not linked'], ...state.accounts.map((account) => [account.id, account.name])]]);
     base.splice(8, 0, ['limit','Overdraft limit','number']);
@@ -916,7 +940,7 @@ async function saveEditor(event) {
     else item[name] = value;
   }
   if (type === 'transaction') { item.budgetMonth = item.date?.slice(0, 7) || state.settings.selectedMonth; item.source ||= 'manual'; item.cleared ??= true; item.incoming = Number(item.incoming || 0); item.outgoing = Number(item.outgoing || 0); }
-  if (type === 'debt' || type === 'overdraft') { item.updatedAt = new Date().toISOString(); item.planPriority ??= 999; }
+  if (type === 'debt' || type === 'overdraft') { item.updatedAt = new Date().toISOString(); item.planPriority ??= 999; item.arrangementConfirmed = item.arrangementStatus === 'confirmed'; }
   if (type === 'account') { item.name ||= 'Unnamed account'; item.active ??= true; }
   await saveState();
   if (type === 'account') populateAccountOptions();
@@ -1246,4 +1270,8 @@ function monthLabel(month) { if (!/^\d{4}-\d{2}$/.test(month || '')) return mont
 function localDateKey(value) { const date = value instanceof Date ? value : new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function titleCase(value) { return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()); }
 function statusLabel(value) { return value ? `Status: ${titleCase(value)}` : 'No notes yet'; }
+function arrangementLabel(item) { return item.arrangementStatus === 'confirmed' ? 'Confirmed' : item.arrangementStatus === 'none' ? 'None confirmed' : 'Unknown'; }
+function requiredPaymentLabel(item) { const value = item.arrangementStatus === 'confirmed' ? item.arrangementPayment : item.contractualPayment; return value == null ? 'Unknown' : formatCurrency(value); }
+function paymentStatusLabel(item) { return `${requiredPaymentLabel(item)} · ${arrangementLabel(item)}`; }
+function limitAprLabel(item) { return `${item.limit == null ? 'Unknown' : formatCurrency(item.limit)} · ${item.apr == null ? 'APR unknown' : `${(item.apr * 100).toFixed(2)}%`}`; }
 function showToast(message) { const toast = byId('toast'); toast.textContent = message; toast.hidden = false; window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 4200); }
