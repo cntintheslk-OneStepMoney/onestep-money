@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "meta": {
     "createdAt": "",
-    "updatedAt": ""
+    "updatedAt": "",
+    "revision": 0
   },
   "profile": {
     "name": "",
@@ -35,6 +36,7 @@
       "weekly": false,
       "weeklyDay": "monday",
       "hour": 9
-    }
+    },
+    "snoozedActions": {}
   }
 }

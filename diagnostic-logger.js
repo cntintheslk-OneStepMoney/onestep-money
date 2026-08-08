@@ -40,8 +40,8 @@ const FAULT_CLASSIFIERS = [
   { pattern: /secure (?:document )?storage is unavailable|encryption unavailable/i, classification: 'SECURE_STORAGE_UNAVAILABLE', reference: 'SEC-101' }
 ];
 
-const ALLOWED_DOCUMENT_TYPES = new Set(['statement', 'payslip']);
-const ALLOWED_FILE_TYPES = new Set(['pdf', 'csv', 'qif', 'ofx', 'json']);
+const ALLOWED_DOCUMENT_TYPES = new Set(['statement', 'payslip', 'credit-report']);
+const ALLOWED_FILE_TYPES = new Set(['pdf', 'csv', 'tsv', 'txt', 'qif', 'ofx', 'qfx', 'json']);
 const ALLOWED_REASON_CODES = new Set([
   'state_not_found', 'read_failure', 'decryption_failure', 'encryption_key_unavailable',
   'invalid_content', 'schema_validation_failure', 'migration_failure', 'unknown_storage_failure',

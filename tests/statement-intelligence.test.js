@@ -69,6 +69,23 @@ test('same amount and date at a different merchant remains a new transaction', (
   assert.equal(result.possible.length, 1);
 });
 
+test('possible duplicate imports are retained with pending inactive review state', () => {
+  const state = baseState();
+  state.transactions.push(transaction({ id: 'existing', description: 'Merchant Alpha' }));
+  const preview = statementPreview([transaction({ id: 'possible', description: 'Merchant Beta' })]);
+  const plan = buildStatementImportPlan(state, preview, 'document-1');
+  const applied = applyStatementImportPlan(state, preview, plan, 'document-1');
+  const possible = applied.state.transactions.find((item) => item.id === 'possible');
+
+  assert.equal(plan.counts.needsReview, 1);
+  assert.equal(possible.duplicateStatus, 'possible');
+  assert.equal(possible.reviewStatus, 'pending');
+  assert.equal(possible.financiallyActive, false);
+  assert.equal(possible.sourceDocumentId, 'document-1');
+  assert.equal(possible.recurring, false);
+  assert.equal(possible.transferStatus, 'no');
+});
+
 test('provider transaction identifiers provide exact duplicate evidence', () => {
   const existing = [transaction({ id: 'existing', providerTransactionId: 'FIT-123', description: 'Old display text', runningBalance: null })];
   const incoming = [transaction({ id: 'incoming', providerTransactionId: 'FIT-123', description: 'New display text', runningBalance: null })];

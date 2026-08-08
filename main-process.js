@@ -4,7 +4,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FinanceDataStore } from './data-store.js';
+import { FinanceDataStore, StateRevisionConflictError } from './data-store.js';
+import { localFinancialMonthKey } from './date-utils.js';
 import { DiagnosticLogger, RENDERER_FAULT_EVENTS } from './diagnostic-logger.js';
 import { extractPdfDocument } from './pdf-service.js';
 import { parseImportedDocument } from './document-import.js';
@@ -164,6 +165,10 @@ function registerIpcHandlers() {
       return currentState;
     } catch (error) {
       await diagnostics.record('STATE_SAVE_FAILED', { error }).catch(() => {});
+      if (error instanceof StateRevisionConflictError) {
+        currentState = error.currentState;
+        return { status: 'conflict', reasonCode: 'state_revision_conflict', message: error.message, state: currentState };
+      }
       throw error;
     }
   });
@@ -474,7 +479,7 @@ function canonicalDocumentName(document, preview, accountId, state) {
   const extension = path.extname(document.originalName).toLowerCase() || '.bin';
   const record = preview.records?.[0];
   const date = preview.kind === 'payslip'
-    ? record?.payDate || `${record?.period || new Date().toISOString().slice(0, 7)}-01`
+    ? record?.payDate || `${record?.period || localFinancialMonthKey()}-01`
     : preview.kind === 'credit-report'
       ? record?.reportDate || new Date().toISOString().slice(0, 10)
       : preview.summary?.statementEndDate || [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
