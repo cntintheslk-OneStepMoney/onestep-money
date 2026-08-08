@@ -1,0 +1,121 @@
+# OneStep Money
+
+![OneStep Money — One clear move at a time](assets/onestep-money-wordmark.png)
+
+**One clear move at a time.**
+
+OneStep Money is a local-first Windows finance companion designed to make money management less overwhelming. It keeps bank statements, payslips, debts, overdrafts, budgets and short next actions together without cloud accounts, analytics or cloud AI.
+
+New installations start completely blank. This repository contains no personal accounts, transactions, payslips, debts, balances, tasks or financial documents.
+
+## What it does
+
+- Gives one small immediate action instead of a crowded to-do list.
+- Imports bank statements with a review step before saving records.
+- Separates debts from overdrafts while comparing both safely in payoff forecasts.
+- Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips.
+- Stores imported originals in an encrypted local document vault.
+- Adds notes and clearer descriptions to accounts, payments, debts and overdrafts.
+- Detects exact and possible duplicate transactions conservatively.
+- Excludes confirmed transfers between owned accounts from income and spending.
+- Uses deterministic local financial checks, with an optional small Ollama model for private natural-language guidance.
+- Builds password-protected portable backups.
+- Supports installed Windows updates through GitHub Releases.
+
+## Supported imports
+
+Bank statements:
+
+- CSV with signed amounts or separate debit and credit columns
+- QIF
+- OFX
+- JSON transaction arrays
+- PDF layouts currently recognised for Nationwide, Halifax and Monzo
+
+Payslips:
+
+- JPA E017 PDF payslips
+
+Unrecognised layouts are rejected visibly. Invalid dates and amounts are never silently replaced with zero or today's date.
+
+## Privacy model
+
+- Live data is stored in Electron's per-user application-data directory, outside the installed application.
+- The finance state and vault key use Electron secure storage when the operating system provides it.
+- Original documents are encrypted using AES-256-GCM and opened only through a restricted in-app viewer.
+- Imported files are deduplicated by SHA-256 checksum.
+- No cloud sync, telemetry, analytics or cloud LLM is included.
+- The optional guide connects only to Ollama on `127.0.0.1` and receives a compact financial summary, never raw document contents or transaction descriptions.
+- Repository checks reject seeded financial data, common secret formats and financial-document file types.
+
+## Run from source
+
+Install a current Node.js release supported by Electron, then run:
+
+```sh
+npm ci
+npm test
+npm run check
+npm start
+```
+
+For a local browser-safe interface preview:
+
+```sh
+npm run preview
+```
+
+The preview never exposes live finance data or the document vault.
+
+## Build Windows installer
+
+```sh
+npm run dist:win
+```
+
+The NSIS installer is written to `dist/`. Application updates do not delete the user's application-data directory.
+
+## Moving from an earlier personal build
+
+Create a password-protected backup in the earlier app, install OneStep Money, then restore that backup from **Settings**. OneStep Money accepts both current `.osmb` backups and the earlier `.hfb` backup format. The migration happens on the user's device; no private data is placed in this repository or in a release package.
+
+## Release updates
+
+The repository workflow publishes a Windows installer and update metadata when a version tag is pushed.
+
+1. Update the version in `package.json` and `package-lock.json`.
+2. Commit and push the change.
+3. Tag the commit, for example `v2.1.1`.
+4. Push the tag.
+
+GitHub Actions runs the tests and privacy check before publishing the release. Installed copies then download the update and offer a clear **Restart and update** button.
+
+Unsigned community builds may trigger Microsoft SmartScreen. Code signing is recommended before distributing the installer widely.
+
+## Document naming
+
+Imported documents use:
+
+```text
+YYYY-MM-DD__document-type__provider.ext
+```
+
+The original filename remains in encrypted document metadata. Numeric suffixes are added only when a canonical filename already exists.
+
+## Local guide
+
+The rule-based financial checks work without extra software. To use the optional local language model:
+
+1. Install and run Ollama.
+2. Install the model configured in Settings; the default is `qwen2.5:1.5b`.
+3. Open **Guide** and check the local-model status.
+
+The guide is designed to present at most one immediate action, followed by optional **This week** and **This month** steps.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Security issues should follow [SECURITY.md](SECURITY.md).
+
+OneStep Money is a planning tool, not regulated financial advice. For debt solutions or creditor negotiations, consider free, independent UK debt advice before making an irreversible decision.
+
+Licensed under the [MIT License](LICENSE).
