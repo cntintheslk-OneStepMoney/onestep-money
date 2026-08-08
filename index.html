@@ -15,6 +15,34 @@
       <p>Your private data and document vault are available only in Electron desktop mode.</p>
     </div>
 
+    <main id="recoveryScreen" class="recovery-screen" hidden>
+      <section class="recovery-card" aria-labelledby="recoveryTitle">
+        <div class="recovery-mark" aria-hidden="true">!</div>
+        <p class="eyebrow">DATA RECOVERY</p>
+        <h1 id="recoveryTitle">OneStep couldn’t open your financial data</h1>
+        <p class="recovery-lead">Your existing data has not been replaced. Saving has been paused while you choose how to recover it.</p>
+        <div class="recovery-notice">
+          <strong id="recoveryReason">The stored data could not be validated.</strong>
+          <span id="recoveryCopyStatus"></span>
+        </div>
+
+        <div class="recovery-section">
+          <div class="recovery-section-heading"><div><h2>Available backups</h2><p>Only backups that pass integrity and compatibility checks can be restored.</p></div></div>
+          <div id="recoveryBackupList" class="recovery-backups"></div>
+        </div>
+
+        <div class="recovery-actions">
+          <button id="retryRecoveryButton" class="primary-button" type="button">Try opening the data again</button>
+          <p id="recoveryStatus" class="muted" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="recovery-destructive">
+          <div><h2>Start again</h2><p>This creates a new financial state. Your existing data will not appear in the new installation.</p></div>
+          <button id="requestFreshStartButton" class="danger-button" type="button">Review start-again warning</button>
+        </div>
+      </section>
+    </main>
+
     <div id="appShell" class="app-shell" hidden>
       <aside class="sidebar">
         <div class="brand">
@@ -139,6 +167,8 @@
     <dialog id="importDialog" class="modal wide"><form method="dialog"><div class="modal-heading"><div><p class="eyebrow">IMPORT PREVIEW</p><h2 id="importTitle">Review before importing</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div><div id="importSummary" class="import-summary"></div><div id="importWarnings" class="warning-box" hidden></div><div class="table-wrap preview-table"><table><thead id="importPreviewHead"></thead><tbody id="importPreviewRows"></tbody></table></div><div class="modal-actions"><button value="cancel" class="secondary-button">Keep document only</button><button id="confirmImportButton" value="default" class="primary-button">Import reviewed records</button></div></form></dialog>
 
     <dialog id="diagnosticsDialog" class="modal wide"><form method="dialog"><div class="modal-heading"><div><p class="eyebrow">PRIVATE SUPPORT REPORT</p><h2>Review diagnostics</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div><p id="diagnosticsSummary" class="muted"></p><div class="warning-box">Exported reports are readable text so support can inspect them. They are not uploaded automatically—only share the file with someone you trust.</div><pre id="diagnosticsPreview" class="diagnostic-preview" tabindex="0"></pre><div class="modal-actions"><button value="cancel" class="secondary-button">Close</button><button id="exportDiagnosticsButton" type="button" class="primary-button">Export this report</button></div></form></dialog>
+
+    <dialog id="freshStartDialog" class="modal destructive-modal"><form id="freshStartForm" method="dialog"><div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DESTRUCTIVE ACTION</p><h2>Start with new financial data?</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div><div class="destructive-warning"><strong>Your current data will not appear in the new installation.</strong><p>OneStep will preserve the unreadable state in a separate recovery copy before creating anything new. This action should only be used when retrying and restoring a valid backup are not possible.</p></div><label class="confirmation-check"><input id="freshStartAcknowledgement" type="checkbox" />I understand that OneStep will create a new blank financial state.</label><p id="freshStartStatus" class="muted" role="status" aria-live="polite"></p><div class="modal-actions"><button value="cancel" class="secondary-button">Cancel</button><button id="confirmFreshStartButton" type="button" class="danger-button" disabled>Start again</button></div></form></dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="renderer-app.js"></script>

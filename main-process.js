@@ -17,6 +17,7 @@ const __dirname = path.dirname(__filename);
 let mainWindow;
 let store;
 let currentState;
+let currentLoadResult;
 let diagnostics;
 let diagnosticPreviewCache;
 
@@ -37,9 +38,10 @@ app.whenReady().then(async () => {
   await diagnostics.record('APP_STARTED');
   if (!diagnostics.encryptionAvailable()) await diagnostics.record('SECURE_STORAGE_UNAVAILABLE');
 
-  store = new FinanceDataStore(app.getPath('userData'), path.join(__dirname, 'seed-data.json'), diagnostics);
+  store = new FinanceDataStore(app.getPath('userData'), path.join(__dirname, 'seed-data.json'), diagnostics, { secureStorage: safeStorage });
   await store.initialise();
-  currentState = await store.loadState();
+  currentLoadResult = await store.loadState();
+  currentState = currentLoadResult.status === 'normal' ? currentLoadResult.state : null;
   registerVaultProtocol();
   registerIpcHandlers();
   createWindow();
@@ -122,8 +124,12 @@ function sendUpdateStatus(status) {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle('state:load', async () => ({ state: currentState, encryption: store.encryptionStatus() }));
+  ipcMain.handle('state:load', async () => currentState && store.mode === 'normal'
+    ? { ...currentLoadResult, status: 'normal', mode: 'normal', state: currentState, encryption: store.encryptionStatus() }
+    : currentLoadResult);
   ipcMain.handle('state:save', async (_event, nextState) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     try {
       if (!nextState || JSON.stringify(nextState).length > 25_000_000) throw new Error('The data update is invalid or too large.');
       currentState = await store.saveState(nextState);
@@ -134,7 +140,15 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('recovery:retry', async () => applyRecoveryResult(await store.retryRecoveryLoad()));
+  ipcMain.handle('recovery:restore-backup', async (_event, backupId) => applyRecoveryResult(await store.restoreRecoveryBackup(backupId)));
+  ipcMain.handle('recovery:fresh-start:request', async () => store.requestFreshStart());
+  ipcMain.handle('recovery:fresh-start:cancel', async (_event, token) => store.cancelFreshStart(token));
+  ipcMain.handle('recovery:fresh-start:confirm', async (_event, token) => applyRecoveryResult(await store.confirmFreshStart(token)));
+
   ipcMain.handle('import:choose', async (_event, options = {}) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     const kind = ['payslip', 'credit-report'].includes(options.kind) ? options.kind : 'statement';
     const selection = await dialog.showOpenDialog(mainWindow, {
       title: kind === 'payslip' ? 'Import payslip' : kind === 'credit-report' ? 'Import credit report' : 'Import bank statement',
@@ -179,6 +193,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('document:open', async (_event, id) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     try {
       if (!currentState.documents.some((document) => document.id === id)) throw new Error('Document not found.');
       const viewer = new BrowserWindow({
@@ -200,6 +216,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('document:delete', async (_event, id) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     try {
       await store.createAutomaticBackup('before-document-delete');
       await store.deleteDocument(id, currentState.documents);
@@ -213,6 +231,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('backup:create', async (_event, passphrase) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     try {
       const selection = await dialog.showSaveDialog(mainWindow, { title: 'Create encrypted backup', defaultPath: `onestep-money-backup-${new Date().toISOString().slice(0, 10)}.osmb`, filters: [{ name: 'OneStep Money backup', extensions: ['osmb'] }] });
       if (selection.canceled || !selection.filePath) return { canceled: true };
@@ -225,6 +245,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('backup:restore', async (_event, passphrase) => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     try {
       const selection = await dialog.showOpenDialog(mainWindow, { title: 'Restore encrypted backup', properties: ['openFile'], filters: [{ name: 'OneStep Money backup', extensions: ['osmb', 'hfb'] }] });
       if (selection.canceled) return { canceled: true };
@@ -236,14 +258,22 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('llm:status', async (_event, model) => checkLocalModel(model || currentState.settings.llmModel));
-  ipcMain.handle('llm:ask', async (_event, question) => askLocalModel(question, currentState, currentState.settings.llmModel));
+  ipcMain.handle('llm:status', async (_event, model) => {
+    const blocked = blockedMutationResult();
+    return blocked || checkLocalModel(model || currentState.settings.llmModel);
+  });
+  ipcMain.handle('llm:ask', async (_event, question) => {
+    const blocked = blockedMutationResult();
+    return blocked || askLocalModel(question, currentState, currentState.settings.llmModel);
+  });
   ipcMain.handle('update:check', async () => {
     if (!app.isPackaged) return { state: 'development', message: 'Updates are disabled in development mode.', currentVersion: app.getVersion() };
     await autoUpdater.checkForUpdates();
     return { state: 'checking', message: 'Checking for updates…', currentVersion: app.getVersion() };
   });
   ipcMain.handle('update:install', async () => {
+    const blocked = blockedMutationResult();
+    if (blocked) return blocked;
     if (!app.isPackaged) return false;
     await store.createAutomaticBackup('before-update');
     setImmediate(() => autoUpdater.quitAndInstall(false, true));
@@ -295,6 +325,17 @@ function registerIpcHandlers() {
     await diagnostics.record(eventName);
     return true;
   });
+}
+
+function blockedMutationResult() {
+  if (!store || store.mode === 'normal') return null;
+  return { status: 'blocked', mode: store.mode, reasonCode: 'recovery_mode_active', message: 'Saving is paused while financial data recovery is required.' };
+}
+
+function applyRecoveryResult(result) {
+  currentLoadResult = result;
+  currentState = result?.status === 'normal' ? result.state : null;
+  return result;
 }
 
 function registerVaultProtocol() {

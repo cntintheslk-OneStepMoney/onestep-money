@@ -12,6 +12,10 @@ let importQueue = [];
 let currentImport = null;
 let editorContext = null;
 let diagnosticPreviewToken = null;
+let recoveryResult = null;
+let freshStartToken = null;
+let normalEventsBound = false;
+let recoveryEventsBound = false;
 
 const viewMeta = {
   today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
@@ -33,18 +37,183 @@ async function initialise() {
   }
   try {
     const loaded = await window.financeAPI.loadState();
-    state = loaded.state;
-    encryption = loaded.encryption;
-    byId('appShell').hidden = false;
-    bindEvents();
-    populateMonthOptions();
-    populateAccountOptions();
-    render();
-    checkModel();
+    if (loaded.status === 'recovery_required') showRecoveryMode(loaded);
+    else if (loaded.status === 'normal') activateNormalMode(loaded);
+    else throw new Error('The secure data store returned an unsupported startup state.');
   } catch (error) {
     byId('desktopRequired').hidden = false;
     byId('desktopRequired').querySelector('p').textContent = `The secure data store could not be opened: ${error.message}`;
   }
+}
+
+function activateNormalMode(loaded) {
+  state = loaded.state;
+  encryption = loaded.encryption;
+  recoveryResult = null;
+  freshStartToken = null;
+  byId('desktopRequired').hidden = true;
+  byId('recoveryScreen').hidden = true;
+  byId('appShell').hidden = false;
+  if (!normalEventsBound) {
+    bindEvents();
+    normalEventsBound = true;
+  }
+  populateMonthOptions();
+  populateAccountOptions();
+  render();
+  checkModel();
+}
+
+function showRecoveryMode(result) {
+  recoveryResult = result;
+  byId('desktopRequired').hidden = true;
+  byId('appShell').hidden = true;
+  byId('recoveryScreen').hidden = false;
+  if (!recoveryEventsBound) {
+    bindRecoveryEvents();
+    recoveryEventsBound = true;
+  }
+  renderRecoveryMode();
+}
+
+function bindRecoveryEvents() {
+  byId('retryRecoveryButton').addEventListener('click', retryRecovery);
+  byId('recoveryBackupList').addEventListener('click', restoreRecoveryBackup);
+  byId('requestFreshStartButton').addEventListener('click', requestFreshStart);
+  byId('freshStartAcknowledgement').addEventListener('change', () => {
+    byId('confirmFreshStartButton').disabled = !byId('freshStartAcknowledgement').checked;
+  });
+  byId('confirmFreshStartButton').addEventListener('click', confirmFreshStart);
+  byId('freshStartDialog').addEventListener('close', cancelFreshStart);
+}
+
+function renderRecoveryMode() {
+  const recovery = recoveryResult?.recovery || {};
+  const reasonMessages = {
+    state_not_found: 'The original state file is no longer available. OneStep will not treat this as a first installation while recovery is active.',
+    read_failure: 'OneStep could not read the existing state file. This may be a temporary permission or storage problem.',
+    decryption_failure: 'The existing state could not be decrypted or authenticated.',
+    encryption_key_unavailable: 'The encryption service or key required to open the existing data is unavailable.',
+    invalid_content: 'The existing state is incomplete or contains invalid data.',
+    schema_validation_failure: 'The existing state did not pass OneStep’s data-integrity checks.',
+    migration_failure: 'OneStep could not safely update the stored data to the current schema.',
+    unknown_storage_failure: 'An unexpected storage error prevented OneStep from safely opening the existing data.'
+  };
+  byId('recoveryReason').textContent = reasonMessages[recovery.reasonCode] || reasonMessages.unknown_storage_failure;
+  byId('recoveryCopyStatus').textContent = recovery.recoveryCopyCreated
+    ? 'A separate byte-for-byte recovery copy was created and verified. The original file was left unchanged.'
+    : 'OneStep could not verify a separate recovery copy. The original file has still not been replaced.';
+
+  const list = byId('recoveryBackupList');
+  clear(list);
+  const backups = recovery.backups || [];
+  const newestValid = backups.find((backup) => backup.valid);
+  for (const backup of backups) {
+    const card = element('article', `recovery-backup ${backup.valid ? '' : 'invalid'}`.trim());
+    const copy = element('div', 'recovery-backup-copy');
+    const title = backup.valid && backup.id === newestValid?.id ? 'Newest valid backup' : backup.valid ? 'Valid backup' : 'Backup could not be validated';
+    append(copy, element('strong', '', title), element('span', '', `${formatRecoveryDate(backup.createdAt)}${backup.schemaVersion ? ` · Schema ${backup.schemaVersion}` : ''}`));
+    card.append(copy);
+    if (backup.valid) {
+      const button = element('button', 'primary-button', 'Restore this backup');
+      button.type = 'button';
+      button.dataset.recoveryBackup = backup.id;
+      card.append(button);
+    } else {
+      card.append(element('span', 'badge red', 'Not usable'));
+    }
+    list.append(card);
+  }
+  if (!backups.length) {
+    list.append(element('p', 'muted', recovery.backupDiscoveryFailed
+      ? 'OneStep could not inspect the local backup folder. You can try opening the original data again.'
+      : 'No local backups were found. You can still retry opening the original data.'));
+  }
+
+  const statusMessages = {
+    restore_failed: 'That backup could not be restored. Recovery mode is still active and the original state remains preserved.',
+    backup_not_found: 'That backup is no longer available. Recovery mode is still active.',
+    fresh_start_failed: 'A new state could not be created safely. Recovery mode is still active.',
+    confirmation_invalid: 'The start-again confirmation expired. Review the warning again if you still want to continue.'
+  };
+  byId('recoveryStatus').textContent = statusMessages[recovery.lastOperationError] || '';
+}
+
+async function retryRecovery() {
+  const button = byId('retryRecoveryButton');
+  button.disabled = true;
+  byId('recoveryStatus').textContent = 'Trying to open and validate the original data…';
+  try {
+    handleRecoveryResponse(await window.financeAPI.retryRecovery());
+  } catch {
+    byId('recoveryStatus').textContent = 'The data still could not be opened. Recovery mode remains active.';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function restoreRecoveryBackup(event) {
+  const button = event.target.closest('[data-recovery-backup]');
+  if (!button) return;
+  if (!window.confirm('Restore this validated backup as the active financial state?')) return;
+  button.disabled = true;
+  byId('recoveryStatus').textContent = 'Restoring and reopening the selected backup…';
+  try {
+    handleRecoveryResponse(await window.financeAPI.restoreRecoveryBackup(button.dataset.recoveryBackup));
+  } catch {
+    byId('recoveryStatus').textContent = 'The backup could not be restored. Recovery mode remains active.';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function requestFreshStart() {
+  const result = await window.financeAPI.requestFreshStart();
+  if (result.status !== 'confirmation_required') {
+    byId('recoveryStatus').textContent = 'The start-again confirmation could not be opened.';
+    return;
+  }
+  freshStartToken = result.token;
+  byId('freshStartAcknowledgement').checked = false;
+  byId('confirmFreshStartButton').disabled = true;
+  byId('freshStartStatus').textContent = '';
+  byId('freshStartDialog').showModal();
+}
+
+async function confirmFreshStart() {
+  if (!freshStartToken || !byId('freshStartAcknowledgement').checked) return;
+  const button = byId('confirmFreshStartButton');
+  button.disabled = true;
+  byId('freshStartStatus').textContent = 'Preserving the original data and creating a new state…';
+  const token = freshStartToken;
+  try {
+    const result = await window.financeAPI.confirmFreshStart(token);
+    freshStartToken = null;
+    byId('freshStartDialog').close('confirmed');
+    handleRecoveryResponse(result);
+  } catch {
+    byId('freshStartStatus').textContent = 'A new state could not be created safely. Nothing has been cleared.';
+    button.disabled = false;
+  }
+}
+
+async function cancelFreshStart() {
+  if (!freshStartToken) return;
+  const token = freshStartToken;
+  freshStartToken = null;
+  await window.financeAPI.cancelFreshStart(token).catch(() => {});
+}
+
+function handleRecoveryResponse(result) {
+  if (result?.status === 'normal') activateNormalMode(result);
+  else if (result?.status === 'recovery_required') showRecoveryMode(result);
+  else byId('recoveryStatus').textContent = 'Recovery could not continue. Your data has not been replaced.';
+}
+
+function formatRecoveryDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Date unavailable';
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 function bindEvents() {
@@ -354,6 +523,7 @@ async function importDocuments(kind) {
   }
   try {
     const results = await window.financeAPI.importFiles({ kind, accountId: kind === 'statement' ? byId('statementAccountSelect').value : '' });
+    if (results?.status === 'blocked') throw new Error(results.message || 'Saving is paused while recovery is required.');
     for (const result of results) {
       if (!state.documents.some((documentItem) => documentItem.id === result.document.id)) {
         state.documents.push(result.document);
@@ -840,7 +1010,9 @@ async function deleteDiagnostics() {
 async function saveAndRender() { await saveState(); render(); }
 async function saveState() {
   synchroniseSelectedMonth();
-  state = await window.financeAPI.saveState(state);
+  const saved = await window.financeAPI.saveState(state);
+  if (saved?.status === 'blocked') throw new Error(saved.message || 'Saving is paused while recovery is required.');
+  state = saved;
 }
 
 function populateMonthOptions() {
