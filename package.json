@@ -26,6 +26,7 @@
     "release:win": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.3",
     "electron-updater": "^6.8.9",
     "pdfjs-dist": "^6.2.108"
   },
@@ -39,6 +40,7 @@
     "asar": true,
     "files": [
       "data-store.js",
+      "diagnostic-logger.js",
       "assets/**",
       "build/icon.ico",
       "document-import.js",

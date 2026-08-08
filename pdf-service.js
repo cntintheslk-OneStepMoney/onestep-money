@@ -1,6 +1,24 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+export function installPdfCompatibilityGlobals() {
+  if (typeof globalThis.DOMMatrix === 'function') return;
+
+  // PDF.js creates a DOMMatrix while its Node bundle is loading, even when we
+  // only extract text. Loading the pure-JavaScript geometry module directly
+  // keeps PDF imports working if the optional native canvas binding cannot be
+  // loaded in a packaged Electron app.
+  const { DOMMatrix } = require('@napi-rs/canvas/geometry');
+  if (typeof DOMMatrix !== 'function') {
+    throw new Error('The PDF compatibility layer is unavailable. Reinstall OneStep Money.');
+  }
+  globalThis.DOMMatrix = DOMMatrix;
+}
 
 export async function extractPdfDocument(filePath) {
+  installPdfCompatibilityGlobals();
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const bytes = await fs.readFile(filePath);
   const loadingTask = pdfjs.getDocument({
