@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildFinancialChecks, buildNextAction, calculateBudgetRows, calculatePeriodSummary, debtPlan, exportTransactionsCsv,
+  availableReportingMonths, buildFinancialChecks, buildNextAction, calculateBudgetRows, calculatePeriodSummary, debtPlan, exportTransactionsCsv,
   findDuplicateCandidates, formatCurrency, matchInternalTransfers
 } from '../finance-core.js';
 
@@ -13,6 +13,26 @@ const baseState = () => ({
 
 test('currency uses UK pounds', () => {
   assert.equal(formatCurrency(1234.56), '£1,234.56');
+});
+
+test('reporting months come only from dated financial records and leave gaps missing', () => {
+  const state = baseState();
+  state.settings.selectedMonth = '2025-08';
+  state.transactions = [
+    { date: '2025-04-03' },
+    { budgetMonth: '2025-06', date: '2025-05-31' },
+    { budgetMonth: 'not-a-month', date: '2025-03-20' },
+    { date: 'not-a-date' }
+  ];
+  state.payslips = [{ period: '2025-01' }, { period: '2025-13', payDate: '2025-02-28' }];
+
+  assert.deepEqual(availableReportingMonths(state), ['2025-06', '2025-04', '2025-03', '2025-02', '2025-01']);
+});
+
+test('reporting months retain a usable selected-month fallback when there is no dated data', () => {
+  const state = baseState();
+  state.settings.selectedMonth = '2025-08';
+  assert.deepEqual(availableReportingMonths(state), ['2025-08']);
 });
 
 test('a blank installation gives one onboarding action without example finance data', () => {
