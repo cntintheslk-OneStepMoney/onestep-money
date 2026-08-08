@@ -46,7 +46,7 @@ function planFor(state, preview = previewFixture()) {
 test('credit-report implementation is packaged and renderer confirms through the atomic plan', () => {
   const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
-  assert.equal(packageJson.version, '2.1.14');
+  assert.equal(packageJson.version, '2.1.15');
   assert.ok(packageJson.build.files.includes('credit-report-intelligence.js'));
   assert.match(renderer, /buildCreditReportImportPlan\(state, preview/);
   assert.match(renderer, /applyCreditReportImportPlan\(state, preview/);
