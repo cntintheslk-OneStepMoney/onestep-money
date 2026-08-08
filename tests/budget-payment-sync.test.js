@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateBudgetAnalysis, calculateBudgetRows, calculatePeriodSummary } from '../finance-core.js';
+import {
+  calculateBudgetAnalysis, calculateBudgetRows, calculatePeriodSummary, findSavingsOpportunities,
+  isTransactionFinanciallyActive, resolvePossibleDuplicate
+} from '../finance-core.js';
+import { financialSnapshot } from '../local-llm-service.js';
 
 function state(overrides = {}) {
   return {
@@ -125,6 +129,62 @@ test('exact duplicates are excluded while legitimate same-value payments both co
     outgoing('duplicate', 20, { category: 'Groceries', duplicateStatus: 'exact' })
   ] });
   assert.equal(calculateBudgetAnalysis(input).actual, 40);
+});
+
+test('pending possible duplicates remain stored but inactive until explicitly accepted', () => {
+  const pendingExpense = outgoing('possible-expense', 120, {
+    category: 'Groceries', duplicateStatus: 'possible', reviewStatus: 'pending', financiallyActive: false
+  });
+  const pendingIncome = {
+    id: 'possible-income', date: '2026-08-08', budgetMonth: '2026-08', incoming: 500, outgoing: 0,
+    transferStatus: 'no', duplicateStatus: 'possible', reviewStatus: 'pending', financiallyActive: false
+  };
+  const input = state({ transactions: [pendingExpense, pendingIncome] });
+
+  assert.equal(input.transactions.length, 2);
+  assert.equal(isTransactionFinanciallyActive(pendingExpense), false);
+  assert.equal(calculateBudgetAnalysis(input).actual, 0);
+  assert.equal(calculatePeriodSummary(input).spending, 0);
+  assert.equal(calculatePeriodSummary(input).income, 0);
+  assert.deepEqual(findSavingsOpportunities(input), []);
+  assert.match(financialSnapshot(input), /External cash flow: £0\.00 in; £0\.00 out; £0\.00 net/);
+
+  const accepted = resolvePossibleDuplicate(input, pendingExpense.id, 'accepted');
+  assert.equal(isTransactionFinanciallyActive(accepted.transactions[0]), true);
+  assert.equal(calculateBudgetAnalysis(accepted).actual, 120);
+  assert.equal(calculatePeriodSummary(accepted).spending, 120);
+
+  const rejected = resolvePossibleDuplicate(input, pendingExpense.id, 'rejected');
+  assert.equal(rejected.transactions.length, 2);
+  assert.equal(isTransactionFinanciallyActive(rejected.transactions[0]), false);
+  assert.equal(calculateBudgetAnalysis(rejected).actual, 0);
+});
+
+test('Savings Opportunities reconcile transfers, review state, refunds, reversals and user overrides with Budget Intelligence', () => {
+  const input = state({
+    budgets: [{ id: 'shopping', category: 'Shopping', planned: 50 }],
+    transactions: [
+      outgoing('purchase', 200, { category: 'Shopping' }),
+      { id: 'refund', date: '2026-08-09', budgetMonth: '2026-08', incoming: 30, outgoing: 0, transferStatus: 'no', refundOfTransactionId: 'purchase', budgetTreatment: 'refund' },
+      outgoing('reversed-purchase', 40, { category: 'Shopping' }),
+      { id: 'reversal', date: '2026-08-10', budgetMonth: '2026-08', incoming: 40, outgoing: 0, transferStatus: 'no', reversalOfTransactionId: 'reversed-purchase', budgetTreatment: 'reversal' },
+      outgoing('transfer', 300, { category: 'Shopping', transferStatus: 'confirmed' }),
+      outgoing('savings', 200, { category: 'Shopping', budgetTreatment: 'savings_transfer' }),
+      outgoing('ignored', 100, { category: 'Shopping', budgetTreatment: 'ignored' }),
+      outgoing('exact', 100, { category: 'Shopping', duplicateStatus: 'exact' }),
+      outgoing('pending', 100, { category: 'Shopping', duplicateStatus: 'possible', reviewStatus: 'pending', financiallyActive: false }),
+      outgoing('debt', 100, { category: 'Debt payment', budgetTreatment: 'debt_payment' }),
+      outgoing('manual-uncategorised', 100, { category: 'Shopping', categorySource: 'manual', budgetCategoryId: '' }),
+      outgoing('manual-shopping', 20, { category: 'Other', categorySource: 'manual', budgetCategoryId: 'shopping' })
+    ]
+  });
+
+  const analysis = calculateBudgetAnalysis(input);
+  const opportunity = findSavingsOpportunities(input).find((item) => item.category === 'Shopping');
+  assert.equal(analysis.rows[0].actual, 190);
+  assert.equal(opportunity.average, 190);
+  assert.equal(opportunity.target, 50);
+  assert.equal(opportunity.possibleSaving, 140);
 });
 
 test('stable budget identifiers preserve relationships across a category rename', () => {

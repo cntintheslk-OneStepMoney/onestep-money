@@ -1,4 +1,6 @@
-export const SCHEMA_VERSION = 6;
+import { localFinancialMonthKey } from './date-utils.js';
+
+export const SCHEMA_VERSION = 7;
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -35,12 +37,13 @@ export function availableReportingMonths(state = {}, fallbackMonth = state.setti
 }
 
 export function periodTransactions(transactions, month) {
-  return (transactions || []).filter((transaction) => String(transaction.budgetMonth || transaction.date || '').slice(0, 7) === month);
+  return (transactions || []).filter((transaction) => String(transaction.budgetMonth || transaction.date || '').slice(0, 7) === month
+    && isTransactionFinanciallyActive(transaction));
 }
 
 export function calculatePeriodSummary(state, month = state.settings?.selectedMonth) {
   const rows = periodTransactions(state.transactions, month);
-  const external = rows.filter((transaction) => transaction.transferStatus !== 'confirmed');
+  const external = rows.filter(isExternalCashflowTransaction);
   const income = sum(external, 'incoming');
   const spending = sum(external, 'outgoing');
   const payslips = (state.payslips || []).filter((payslip) => payslip.period === month);
@@ -70,7 +73,7 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   const budgets = state.budgets || [];
   const transactions = periodTransactions(state.transactions, month);
   const budgetsById = new Map(budgets.map((budget) => [String(budget.id), budget]));
-  const transactionsById = new Map(transactions.map((transaction) => [String(transaction.id), transaction]));
+  const transactionsById = new Map((state.transactions || []).map((transaction) => [String(transaction.id), transaction]));
   const actualPennies = new Map(budgets.map((budget) => [String(budget.id), 0]));
   const contributions = new Map(budgets.map((budget) => [String(budget.id), []]));
   const assignmentCache = new Map();
@@ -116,7 +119,6 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   };
 
   for (const transaction of transactions) {
-    if (!isBudgetTransactionActive(transaction)) continue;
     const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
     if (transaction.transferStatus === 'confirmed' || ['transfer', 'savings_transfer', 'ignored'].includes(treatment)) continue;
 
@@ -189,7 +191,7 @@ export function buildNextAction(state, now = new Date()) {
     const firstAccount = { id: 'generated-first-account', title: 'Add your first account', detail: 'Open Settings, add one bank account, then stop. No balances need to be perfect yet.', timeframe: '5 min', stage: 'today' };
     return isSnoozed(firstAccount.id) ? checkIn : firstAccount;
   }
-  if (!(state.transactions || []).length) {
+  if (!(state.transactions || []).some(isTransactionFinanciallyActive)) {
     const firstImport = { id: 'generated-first-import', title: 'Import one recent statement', detail: 'Choose one account and review the preview before accepting any payments.', timeframe: '10 min', stage: 'today' };
     return isSnoozed(firstImport.id) ? checkIn : firstImport;
   }
@@ -249,20 +251,58 @@ export function buildFinancialChecks(state, month = state.settings?.selectedMont
 }
 
 export function findSavingsOpportunities(state) {
-  const months = [...new Set((state.transactions || []).map((transaction) => String(transaction.budgetMonth || '').slice(0, 7)).filter(Boolean))];
-  const externalExpenses = (state.transactions || []).filter((transaction) => transaction.outgoing > 0 && transaction.transferStatus !== 'confirmed');
-  const categories = new Map();
-  for (const transaction of externalExpenses) categories.set(transaction.category, (categories.get(transaction.category) || 0) + transaction.outgoing);
   const flexible = ['Subscriptions & software', 'Eating out', 'Shopping', 'Other / review'];
-  const budgetByCategory = new Map((state.budgets || []).map((budget) => [budget.category, Number(budget.planned || 0)]));
+  const existingBudgets = state.budgets || [];
+  const existingKeys = new Set(existingBudgets.map((budget) => normalise(budget.category)));
+  const analysisBudgets = [
+    ...existingBudgets,
+    ...flexible.filter((category) => !existingKeys.has(normalise(category))).map((category) => ({
+      id: `savings-analysis-${normalise(category).replace(/[^a-z0-9]+/g, '-')}`,
+      category,
+      planned: 0
+    }))
+  ];
+  const months = [...new Set((state.transactions || [])
+    .filter(isTransactionFinanciallyActive)
+    .map((transaction) => reportingMonth(transaction.budgetMonth) || reportingMonth(transaction.date))
+    .filter(Boolean))];
+  const categoryTotals = new Map(flexible.map((category) => [normalise(category), 0]));
+  for (const month of months) {
+    const analysis = calculateBudgetAnalysis({ ...state, budgets: analysisBudgets }, month);
+    for (const row of analysis.rows) {
+      const key = normalise(row.category);
+      if (categoryTotals.has(key)) categoryTotals.set(key, categoryTotals.get(key) + Number(row.actual || 0));
+    }
+  }
+  const budgetByCategory = new Map(existingBudgets.map((budget) => [normalise(budget.category), Number(budget.planned || 0)]));
   const opportunities = flexible.map((category) => {
-    const average = roundMoney((categories.get(category) || 0) / Math.max(1, months.length));
-    const target = budgetByCategory.get(category) || (category === 'Eating out' ? 50 : 0);
+    const average = roundMoney((categoryTotals.get(normalise(category)) || 0) / Math.max(1, months.length));
+    const key = normalise(category);
+    const target = budgetByCategory.has(key) ? budgetByCategory.get(key) : (category === 'Eating out' ? 50 : 0);
     const possibleSaving = roundMoney(Math.max(0, average - target));
     return { category, average, target, possibleSaving, text: `${category} averaged ${formatCurrency(average)} a month. Reviewing it against a ${formatCurrency(target)} cap could free roughly ${formatCurrency(possibleSaving)} a month.` };
   }).filter((entry) => entry.possibleSaving > 0).sort((left, right) => right.possibleSaving - left.possibleSaving);
 
   return opportunities;
+}
+
+export function isTransactionFinanciallyActive(transaction = {}) {
+  if (transaction.deletedAt || transaction.ignored === true || transaction.valid === false) return false;
+  if (transaction.duplicateStatus === 'exact') return false;
+  if (transaction.reviewStatus === 'rejected') return false;
+  if (transaction.duplicateStatus === 'possible' && transaction.reviewStatus !== 'accepted') return false;
+  return transaction.financiallyActive !== false;
+}
+
+export function resolvePossibleDuplicate(state, transactionId, decision) {
+  if (!['accepted', 'rejected'].includes(decision)) throw new TypeError('Choose whether to accept or reject this possible duplicate.');
+  const next = structuredClone(state);
+  const transaction = (next.transactions || []).find((item) => item.id === transactionId);
+  if (!transaction || transaction.duplicateStatus !== 'possible') throw new Error('This possible duplicate is no longer available for review.');
+  transaction.reviewStatus = decision;
+  transaction.financiallyActive = decision === 'accepted';
+  transaction.reviewedAt = new Date().toISOString();
+  return next;
 }
 
 export function debtPlan(state, strategy = 'hybrid', extraPayment = state.settings?.extraDebtPayment ?? 0, startMonth = currentMonth()) {
@@ -681,7 +721,9 @@ function debtRiskRank(safety) {
 }
 
 function isBlankState(state) {
-  return ['accounts', 'transactions', 'payslips', 'creditReports', 'debts', 'overdrafts', 'budgets'].every((key) => !(state[key] || []).length);
+  return !(state.accounts || []).length
+    && !(state.transactions || []).some(isTransactionFinanciallyActive)
+    && ['payslips', 'creditReports', 'debts', 'overdrafts', 'budgets'].every((key) => !(state[key] || []).length);
 }
 
 function reportedAccountMatches(existing, reported) {
@@ -740,7 +782,7 @@ function accountMatchKey(value) {
 }
 
 function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return localFinancialMonthKey();
 }
 
 function reportingMonth(value) {
@@ -825,11 +867,10 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function isBudgetTransactionActive(transaction) {
-  return !transaction.deletedAt
-    && transaction.ignored !== true
-    && transaction.valid !== false
-    && transaction.duplicateStatus !== 'exact';
+function isExternalCashflowTransaction(transaction) {
+  const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
+  return transaction.transferStatus !== 'confirmed'
+    && !['transfer', 'savings_transfer', 'ignored'].includes(treatment);
 }
 
 function normaliseBudgetTreatment(value) {

@@ -1,4 +1,4 @@
-import { calculateBudgetAnalysis, debtPlan } from './finance-core.js';
+import { calculateBudgetAnalysis, calculatePeriodSummary, debtPlan } from './finance-core.js';
 
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/chat';
 
@@ -39,12 +39,12 @@ export async function askLocalModel(question, state, model = 'qwen2.5:1.5b') {
   return message ? { ok: true, mode: 'local-llm', message, status } : { ok: false, status: { ...status, reason: 'The local model returned no answer.' } };
 }
 
-function financialSnapshot(state) {
+export function financialSnapshot(state) {
   const plan = debtPlan(state, 'hybrid');
   const month = state.settings?.selectedMonth || '';
-  const monthRows = (state.transactions || []).filter((item) => String(item.budgetMonth || item.date).startsWith(month) && item.transferStatus !== 'confirmed');
-  const incoming = money(monthRows.reduce((sum, item) => sum + Number(item.incoming || 0), 0));
-  const outgoing = money(monthRows.reduce((sum, item) => sum + Number(item.outgoing || 0), 0));
+  const summary = calculatePeriodSummary(state, month);
+  const incoming = money(summary.income);
+  const outgoing = money(summary.spending);
   const budgetAnalysis = calculateBudgetAnalysis(state, month);
   const budgets = budgetAnalysis.rows.map((item) => `${item.category}: planned ${money(item.planned)}, spent ${money(item.actual)}, remaining ${money(item.remaining)}`).join('; ');
   const debts = (state.debts || []).map((item) => `${item.name}: balance ${money(item.currentBalance)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, contractual payment ${knownMoney(item.contractualPayment)}, status ${item.status || 'unknown'}, arrangement ${item.arrangementStatus || 'unknown'}, arrangement payment ${knownMoney(item.arrangementPayment)}, status conflict ${item.statusConflict ? 'yes' : 'no'}, interest frozen ${item.interestFrozen ? 'yes' : 'no'}`).join('\n');

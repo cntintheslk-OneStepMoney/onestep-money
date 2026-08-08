@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { localFinancialMonthKey } from './date-utils.js';
 
 const STATE_FILE = 'finance-state.json';
 const KEY_FILE = 'vault-key.json';
@@ -10,7 +11,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 const PORTABLE_BACKUP_FORMAT_VERSION = 2;
 const LOCAL_BACKUP_FORMAT_VERSION = 1;
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 const FRESH_START_CONFIRMATION_MS = 5 * 60 * 1000;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
@@ -72,6 +73,17 @@ export class PersistenceBusyError extends Error {
   }
 }
 
+export class StateRevisionConflictError extends Error {
+  constructor(expectedRevision, actualRevision, currentState) {
+    super('Financial information changed while this edit was open. OneStep protected the newer information. Review the latest state and try again.');
+    this.name = 'StateRevisionConflictError';
+    this.code = 'STATE_REVISION_CONFLICT';
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+    this.currentState = structuredClone(currentState);
+  }
+}
+
 class StateLoadError extends Error {
   constructor(reasonCode, cause = null) {
     super(reasonCode);
@@ -104,6 +116,7 @@ export class FinanceDataStore {
     this.backupCandidates = new Map();
     this.freshStartConfirmation = null;
     this.interruptedRestoreUnresolved = false;
+    this.stateSaveTail = Promise.resolve();
   }
 
   async initialise() {
@@ -149,7 +162,9 @@ export class FinanceDataStore {
 
   async saveState(state) {
     this.assertWritable();
-    return this.writeState(state);
+    const operation = this.stateSaveTail.then(() => this.writeState(state));
+    this.stateSaveTail = operation.catch(() => {});
+    return operation;
   }
 
   assertWritable() {
@@ -260,6 +275,16 @@ export class FinanceDataStore {
     if (!options.bypassRecovery) this.assertWritable();
     const clean = this.migrate(structuredClone(state));
     validateMigratedState(clean);
+    const expectedRevision = clean.meta.revision;
+    if (!options.bypassRecovery) {
+      const current = await this.inspectStateFile(this.statePath);
+      if (current.status !== 'loaded') throw new StateLoadError(current.reasonCode || LOAD_REASON_CODES.READ_FAILURE, current.error);
+      const actualRevision = current.state.meta.revision;
+      if (expectedRevision !== actualRevision) {
+        throw new StateRevisionConflictError(expectedRevision, actualRevision, current.state);
+      }
+    }
+    clean.meta.revision = expectedRevision + 1;
     clean.meta.updatedAt = this.clock().toISOString();
     const json = JSON.stringify(clean);
     const encrypted = this.encryptionAvailable();
@@ -1015,6 +1040,14 @@ export class FinanceDataStore {
   }
 
   async runRestoreTransaction(options) {
+    const live = await this.inspectStateFile(this.statePath);
+    const liveRevision = live.status === 'loaded' ? live.state.meta.revision : -1;
+    const decoded = {
+      ...options.decoded,
+      state: structuredClone(options.decoded.state)
+    };
+    decoded.state.meta.revision = Math.max(liveRevision, decoded.state.meta.revision) + 1;
+    options = { ...options, decoded };
     const transactionId = crypto.randomUUID();
     const transactionPath = path.join(this.restorePath, transactionId);
     const journal = {
@@ -1815,10 +1848,14 @@ function migrateState(input) {
   const state = input && typeof input === 'object' ? input : {};
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    meta: { createdAt: state.meta?.createdAt || new Date().toISOString(), updatedAt: state.meta?.updatedAt || new Date().toISOString() },
+    meta: {
+      createdAt: state.meta?.createdAt || new Date().toISOString(),
+      updatedAt: state.meta?.updatedAt || new Date().toISOString(),
+      revision: nonNegativeInteger(state.meta?.revision, 0)
+    },
     profile: state.profile || { name: '', locale: 'en-GB', currency: 'GBP', dependableIncome: 0, paydayDay: 30 },
     accounts: Array.isArray(state.accounts) ? state.accounts : [],
-    transactions: Array.isArray(state.transactions) ? state.transactions : [],
+    transactions: Array.isArray(state.transactions) ? state.transactions.map(migrateTransactionReviewState) : [],
     payslips: Array.isArray(state.payslips) ? state.payslips : [],
     taxDocuments: Array.isArray(state.taxDocuments) ? state.taxDocuments : [],
     creditReports: Array.isArray(state.creditReports) ? state.creditReports : [],
@@ -1830,20 +1867,88 @@ function migrateState(input) {
     tasks: Array.isArray(state.tasks) ? state.tasks : [],
     checkIns: Array.isArray(state.checkIns) ? state.checkIns : [],
     importBatches: Array.isArray(state.importBatches) ? state.importBatches : [],
-    settings: {
-      selectedMonth: state.settings?.selectedMonth || currentMonth(),
-      extraDebtPayment: Number(state.settings?.extraDebtPayment ?? 0),
-      emergencyBufferTarget: Number(state.settings?.emergencyBufferTarget ?? 500),
-      emergencyBufferBalance: Number(state.settings?.emergencyBufferBalance ?? 0),
-      extraIncomeDebtPercent: Number(state.settings?.extraIncomeDebtPercent ?? 80),
-      llmModel: state.settings?.llmModel || 'qwen2.5:1.5b',
-      reminders: state.settings?.reminders || { weekly: true, weeklyDay: 'monday', hour: 9 }
-    }
+    settings: migrateSettings(state.settings)
   };
 }
 
 function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return localFinancialMonthKey();
+}
+
+const SETTING_NORMALISERS = Object.freeze({
+  selectedMonth: (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || '')) ? String(value) : currentMonth(),
+  extraDebtPayment: (value) => finiteNumber(value, 0),
+  emergencyBufferTarget: (value) => finiteNumber(value, 500),
+  emergencyBufferBalance: (value) => finiteNumber(value, 0),
+  extraIncomeDebtPercent: (value) => finiteNumber(value, 80),
+  llmModel: (value) => String(value || 'qwen2.5:1.5b').replace(/[\r\n]/g, '').slice(0, 120) || 'qwen2.5:1.5b',
+  reminders: migrateReminders,
+  snoozedActions: migrateSnoozedActions
+});
+
+function migrateSettings(value) {
+  const settings = isPlainObject(value) ? value : {};
+  return Object.fromEntries(Object.entries(SETTING_NORMALISERS).map(([key, normaliseValue]) => [key, normaliseValue(settings[key])]));
+}
+
+function migrateReminders(value) {
+  const reminders = isPlainObject(value) ? value : {};
+  const day = String(reminders.weeklyDay || 'monday').toLowerCase();
+  return {
+    weekly: reminders.weekly !== false,
+    weeklyDay: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].includes(day) ? day : 'monday',
+    hour: Math.min(23, Math.max(0, nonNegativeInteger(reminders.hour, 9)))
+  };
+}
+
+function migrateSnoozedActions(value) {
+  if (!isPlainObject(value)) return {};
+  const today = localDateKey(new Date());
+  const entries = Object.entries(value).filter(([key, until]) => /^[a-z0-9][a-z0-9_-]{0,119}$/i.test(key)
+    && isValidLocalDateKey(until)
+    && String(until) > today);
+  return Object.fromEntries(entries.slice(0, 200));
+}
+
+function migrateTransactionReviewState(item) {
+  if (!isPlainObject(item)) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+  const duplicateStatus = ['none', 'possible', 'exact'].includes(item.duplicateStatus) ? item.duplicateStatus : 'none';
+  if (duplicateStatus === 'possible') {
+    const reviewStatus = ['pending', 'accepted', 'rejected'].includes(item.reviewStatus) ? item.reviewStatus : 'pending';
+    return { ...item, duplicateStatus, reviewStatus, financiallyActive: reviewStatus === 'accepted' };
+  }
+  if (duplicateStatus === 'exact') return { ...item, duplicateStatus, reviewStatus: 'rejected', financiallyActive: false };
+  return {
+    ...item,
+    duplicateStatus,
+    reviewStatus: item.reviewStatus === 'rejected' ? 'rejected' : 'not_required',
+    financiallyActive: item.reviewStatus === 'rejected' ? false : item.financiallyActive !== false
+  };
+}
+
+function finiteNumber(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : fallback;
+}
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isValidLocalDateKey(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
 }
 
 function migrateDebtSafetyRecord(item) {
@@ -1943,6 +2048,9 @@ function validateMigratedState(state) {
   if (!isPlainObject(state.meta) || !isPlainObject(state.profile) || !isPlainObject(state.settings) || !isPlainObject(state.settings.reminders)) {
     throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
+  if (!Number.isInteger(state.meta.revision) || state.meta.revision < 0 || !isPlainObject(state.settings.snoozedActions)) {
+    throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+  }
   for (const value of [
     state.profile.dependableIncome,
     state.settings.extraDebtPayment,
@@ -1959,6 +2067,16 @@ function validateMigratedState(state) {
       || item.arrangementConfirmed !== (item.arrangementStatus === 'confirmed')
       || (item.arrangementPayment !== null && (!Number.isFinite(item.arrangementPayment) || item.arrangementPayment < 0))
       || (item.arrearsAmount !== null && (!Number.isFinite(item.arrearsAmount) || item.arrearsAmount < 0))) {
+      throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+    }
+  }
+  for (const transaction of state.transactions) {
+    if (!isPlainObject(transaction)
+      || !['none', 'possible', 'exact'].includes(transaction.duplicateStatus)
+      || !['not_required', 'pending', 'accepted', 'rejected'].includes(transaction.reviewStatus)
+      || typeof transaction.financiallyActive !== 'boolean'
+      || (transaction.duplicateStatus === 'possible' && transaction.financiallyActive !== (transaction.reviewStatus === 'accepted'))
+      || (transaction.duplicateStatus === 'exact' && transaction.financiallyActive !== false)) {
       throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
     }
   }

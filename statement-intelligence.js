@@ -1,6 +1,6 @@
 import {
   createId, detectRecurringTransactions, findDuplicateCandidates, matchInternalTransfers,
-  matchStatementAccount, syncStatementAccount
+  isTransactionFinanciallyActive, matchStatementAccount, syncStatementAccount
 } from './finance-core.js';
 
 export function buildStatementImportPlan(state, preview, documentId = '') {
@@ -11,9 +11,11 @@ export function buildStatementImportPlan(state, preview, documentId = '') {
   const exactIds = new Set(duplicates.exact.map((item) => item.incoming.id));
   const possibleIds = new Set(duplicates.possible.map((item) => item.incoming.id));
   const newRecords = (preview.records || []).filter((record) => !exactIds.has(record.id));
-  const recurring = detectRecurringTransactions(state.transactions || [], newRecords);
-  const transferMatches = matchInternalTransfers([...(state.transactions || []), ...newRecords], accounts)
-    .filter((match) => newRecords.some((record) => record.id === match.debitId || record.id === match.creditId));
+  const trustedHistory = (state.transactions || []).filter(isTransactionFinanciallyActive);
+  const trustedNewRecords = newRecords.filter((record) => !possibleIds.has(record.id));
+  const recurring = detectRecurringTransactions(trustedHistory, trustedNewRecords);
+  const transferMatches = matchInternalTransfers([...trustedHistory, ...trustedNewRecords], accounts)
+    .filter((match) => trustedNewRecords.some((record) => record.id === match.debitId || record.id === match.creditId));
   const balance = balanceChangePlan(accountMatch.account, preview);
   const configuredCurrency = String(state.profile?.currency || 'GBP').toUpperCase();
   const statementCurrency = String(preview.accountIdentity?.currency || preview.summary?.currency || '').toUpperCase();
@@ -82,6 +84,8 @@ export function applyStatementImportPlan(state, preview, reviewedPlan, documentI
       sourceDocumentId: documentId || record.sourceDocumentId || '',
       sourceDocumentIds: [...new Set([...(record.sourceDocumentIds || []), documentId || record.sourceDocumentId].filter(Boolean))],
       duplicateStatus: possibleIds.has(record.id) ? 'possible' : 'none',
+      reviewStatus: possibleIds.has(record.id) ? 'pending' : 'not_required',
+      financiallyActive: !possibleIds.has(record.id),
       recurring: record.recurring || observation?.confidence === 'confirmed',
       recurringObservation: observation || null
     });

@@ -30,6 +30,30 @@ test('diagnostics keep approved fault metadata and redact raw error details', as
   assert.doesNotMatch(encryptedFile, /DOMMatrix|12345678|Private/);
 });
 
+test('diagnostics retain supported credit-report and statement classifications without sensitive context', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory);
+
+  await logger.record('DOCUMENT_IMPORT_FAILED', {
+    documentType: 'credit-report', fileType: 'pdf',
+    error: new Error('Fictional private credit reference and value £1234.56')
+  });
+  for (const fileType of ['tsv', 'txt', 'qfx']) {
+    await logger.record('DOCUMENT_IMPORT_FAILED', {
+      documentType: 'statement', fileType,
+      error: new Error(`private-${fileType}-filename account 12345678`)
+    });
+  }
+  const report = await logger.buildReport();
+
+  assert.match(report.text, /document_type=credit-report file_type=pdf/);
+  assert.match(report.text, /document_type=statement file_type=tsv/);
+  assert.match(report.text, /document_type=statement file_type=txt/);
+  assert.match(report.text, /document_type=statement file_type=qfx/);
+  assert.doesNotMatch(report.text, /1234\.56|12345678|private-|credit reference/);
+});
+
 test('detailed diagnostics are not written when secure storage is unavailable', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
