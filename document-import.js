@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { normaliseCreditAccountType, normaliseCreditStatus, normaliseLender } from './credit-report-intelligence.js';
 
 const MONEY_PATTERN = /^(?:[-+]?\s*(?:£|GBP)?\s*[\d,]+\.\d{2}|\((?:£|GBP)?\s*[\d,]+\.\d{2}\))(?:\s*(?:CR|DR))?$/i;
 const MONTHS = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
@@ -87,11 +88,17 @@ export function parsePayslipText(text, fileName = 'Payslip.pdf') {
 export function parseCreditReportText(text, fileName = 'credit-report.pdf') {
   const sourceText = String(text || '');
   const provider = detectCreditReportProvider(sourceText);
-  const reportDate = findLabelledDate(sourceText, /(?:report date|date of report|generated (?:on|at)|report generated)/i);
+  const reportDate = findLabelledDate(sourceText, /(?:report date|date of report|report as at|report correct (?:on|at)|generated (?:on|at)|report generated)/i);
   const scoreMatch = sourceText.match(/(?:credit\s+score|your\s+score)(?:\s+is|\s*:)?\s*(\d{1,4})(?:\s*(?:\/|out of)\s*(\d{2,4}))?/i);
   const score = scoreMatch ? Number(scoreMatch[1]) : null;
   const scoreMaximum = scoreMatch?.[2] ? Number(scoreMatch[2]) : null;
-  const accounts = parseCreditReportAccounts(sourceText, fileName);
+  const accounts = parseCreditReportAccounts(sourceText, fileName).map((account) => ({
+    ...account,
+    sourceProvider: provider || '',
+    sourceReportDate: reportDate,
+    reportedDate: account.updatedDate || reportDate,
+    confidence: account.lender && account.normalisedAccountType !== 'unknown' && account.currentBalance !== null ? 'high' : 'review'
+  }));
   const warnings = [];
   if (!provider) warnings.push('The credit-report provider was not identified automatically.');
   if (!reportDate) warnings.push('The report date was not identified automatically.');
@@ -102,7 +109,9 @@ export function parseCreditReportText(text, fileName = 'credit-report.pdf') {
     provider: provider || 'Unknown provider',
     reportDate,
     score,
+    scoreMinimum: scoreMaximum ? 0 : null,
     scoreMaximum,
+    sourceFormat: 'pdf-text',
     accounts,
     notes: '',
     source: fileName
@@ -112,7 +121,7 @@ export function parseCreditReportText(text, fileName = 'credit-report.pdf') {
     records: [report],
     rejected: [],
     warnings,
-    summary: { provider: report.provider, reportDate, score, scoreMaximum, accountCount: accounts.length },
+    summary: { provider: report.provider, reportDate, score, scoreMinimum: report.scoreMinimum, scoreMaximum, accountCount: accounts.length },
     reconciled: Boolean(provider && reportDate && accounts.length)
   };
 }
@@ -121,9 +130,9 @@ function detectCreditReportProvider(text) {
   if (/\bExperian\b/i.test(text)) return 'Experian';
   if (/\bClearScore\b/i.test(text)) return 'ClearScore';
   if (/\bCredit Karma\b/i.test(text)) return 'Credit Karma';
+  if (/\bTotallyMoney\b/i.test(text)) return 'TotallyMoney';
   if (/\bTransUnion\b/i.test(text)) return 'TransUnion';
   if (/\bEquifax\b/i.test(text)) return 'Equifax';
-  if (/\bTotallyMoney\b/i.test(text)) return 'TotallyMoney';
   return '';
 }
 
@@ -153,35 +162,80 @@ function parseCreditReportAccounts(text, fileName) {
     const status = labelledText(block, /^(?:account status|payment status|status)\s*:?\s*(.*)$/i);
     const openedText = labelledText(block, /^(?:opened|opening date|start date|account opened)\s*:?\s*(.*)$/i);
     const referenceText = labelledText(block, /^(?:account number|account reference|reference number|reference)\s*:?\s*(.*)$/i);
-    const paymentText = labelledText(block, /^(?:monthly payment|regular payment|minimum payment|payment amount)\s*:?\s*(.*)$/i);
+    const monthlyPaymentText = labelledText(block, /^(?:monthly payment|regular payment|agreed instalment|payment amount)\s*:?\s*(.*)$/i);
+    const minimumPaymentText = labelledText(block, /^(?:minimum payment|min payment)\s*:?\s*(.*)$/i);
     const aprText = labelledText(block, /^(?:apr|annual percentage rate|interest rate)\s*:?\s*(.*)$/i);
     const originalBalanceText = labelledText(block, /^(?:original balance|opening balance|original amount|loan amount)\s*:?\s*(.*)$/i);
     const defaultDateText = labelledText(block, /^(?:default date|date defaulted)\s*:?\s*(.*)$/i);
+    const settledDateText = labelledText(block, /^(?:settlement date|settled date|date settled|satisfied date)\s*:?\s*(.*)$/i);
+    const closedDateText = labelledText(block, /^(?:closure date|closed date|date closed)\s*:?\s*(.*)$/i);
     const updatedText = labelledText(block, /^(?:last updated|updated on|balance updated|reported on)\s*:?\s*(.*)$/i);
+    const arrearsText = labelledText(block, /^(?:arrears balance|arrears amount|amount in arrears)\s*:?\s*(.*)$/i);
+    const missedPaymentsText = labelledText(block, /^(?:missed payments|payments missed|months in arrears)\s*:?\s*(.*)$/i);
+    const arrangementText = labelledText(block, /^(?:payment arrangement|arrangement to pay|special arrangement|payment plan)\s*:?\s*(.*)$/i);
+    const arrangementPaymentText = labelledText(block, /^(?:arrangement payment|agreed payment|reduced payment)\s*:?\s*(.*)$/i);
+    const interestTreatmentText = labelledText(block, /^(?:interest treatment|interest status|interest frozen|charges frozen)\s*:?\s*(.*)$/i);
+    const responsibilityText = labelledText(block, /^(?:responsibility|account ownership|liability)\s*:?\s*(.*)$/i);
+    const disputeText = labelledText(block, /^(?:dispute status|account disputed|disputed)\s*:?\s*(.*)$/i);
+    const originalLender = labelledText(block, /^(?:original lender|original creditor)\s*:?\s*(.*)$/i);
     const currentBalance = moneyFromText(balanceText);
     const creditLimit = moneyFromText(limitText);
-    const contractualPayment = moneyFromText(paymentText);
+    const monthlyPayment = moneyFromText(monthlyPaymentText);
+    const minimumPayment = moneyFromText(minimumPaymentText);
+    const contractualPayment = monthlyPayment ?? minimumPayment;
     const originalBalance = moneyFromText(originalBalanceText);
     const apr = percentageFromText(aprText);
     const openedDate = dateFromText(openedText);
     const defaultDate = dateFromText(defaultDateText);
+    const settledDate = dateFromText(settledDateText);
+    const closedDate = dateFromText(closedDateText);
     const updatedDate = dateFromText(updatedText);
     const accountReference = accountReferenceFromText(referenceText);
+    const normalisedAccountType = normaliseCreditAccountType(accountType);
+    let normalisedStatus = normaliseCreditStatus(status);
+    if (normalisedStatus === 'unknown' && defaultDate) normalisedStatus = 'defaulted';
+    if (normalisedStatus === 'unknown' && settledDate) normalisedStatus = 'settled';
+    if (normalisedStatus === 'unknown' && closedDate) normalisedStatus = 'closed';
+    if (currentBalance !== null && creditLimit !== null && currentBalance > creditLimit && !['defaulted', 'arrears'].includes(normalisedStatus)) normalisedStatus = 'over_limit';
+    const lifecycleStatus = normalisedStatus === 'settled' ? 'settled' : normalisedStatus === 'closed' ? 'closed' : normalisedStatus === 'unknown' ? 'unknown' : 'active';
+    const arrangementStatus = arrangementStatusFromText(arrangementText || status);
+    const arrearsAmount = moneyFromText(arrearsText);
+    const missedPayments = integerFromText(missedPaymentsText);
+    const arrangementPayment = moneyFromText(arrangementPaymentText);
+    const interestFrozen = explicitPositive(interestTreatmentText, /frozen|suspended|no interest|no charges/i);
+    const jointAccount = explicitPositive(responsibilityText, /joint|shared/i);
+    const disputed = explicitPositive(disputeText || status, /disputed|in dispute/i);
     if (!lender || (!accountType && currentBalance === null && creditLimit === null && contractualPayment === null && originalBalance === null && apr === null && !status && !openedDate && !defaultDate)) return;
     accounts.push({
       id: stableId('credit-report-account', fileName, lender, accountType, currentBalance, creditLimit, contractualPayment, originalBalance, apr, status, openedDate, defaultDate, accountReference),
       lender,
+      normalisedLender: normaliseLender(lender),
       accountType,
+      normalisedAccountType,
       currentBalance,
       creditLimit,
       contractualPayment,
+      monthlyPayment,
+      minimumPayment,
       originalBalance,
       apr,
       status,
+      normalisedStatus,
+      lifecycleStatus,
       openedDate,
       defaultDate,
+      settledDate,
+      closedDate,
       updatedDate,
       accountReference,
+      arrearsAmount,
+      missedPayments,
+      arrangementStatus,
+      arrangementPayment,
+      interestFrozen,
+      jointAccount,
+      disputed,
+      originalLender,
       notes: ''
     });
   });
@@ -203,8 +257,8 @@ function nextUnlabelledValue(lines, index) {
 }
 
 function moneyFromText(value) {
-  const match = String(value || '').match(/(?:[-+]?\s*(?:£|GBP)?\s*[\d,]+(?:\.\d{2})?|\((?:£|GBP)?\s*[\d,]+(?:\.\d{2})?\))(?:\s*(?:CR|DR))?/i);
-  return match ? parseMoney(match[0]) : null;
+  const match = String(value || '').match(/(?:^|[^A-Za-z0-9.,])((?:[-+]?\s*(?:£|GBP)?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?|\((?:£|GBP)?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\))(?:\s*(?:CR|DR))?)(?![A-Za-z0-9.,])/i);
+  return match ? parseMoney(match[1]) : null;
 }
 
 function percentageFromText(value) {
@@ -222,6 +276,25 @@ function accountReferenceFromText(value) {
   const compact = String(value || '').replace(/\s/g, '');
   const visible = compact.match(/([A-Za-z0-9]{4})$/)?.[1] || '';
   return visible ? `••••${visible.toUpperCase()}` : '';
+}
+
+function arrangementStatusFromText(value) {
+  const text = normaliseWhitespace(value).toLowerCase();
+  if (!text) return 'unknown';
+  if (/\b(?:yes|confirmed|active|arrangement to pay|payment plan|reduced payment)\b/.test(text)) return 'confirmed';
+  if (/\b(?:no|none|not arranged|no arrangement)\b/.test(text)) return 'none';
+  return 'unknown';
+}
+
+function integerFromText(value) {
+  const match = String(value || '').match(/\b(\d{1,2})\b/);
+  return match ? Number(match[1]) : null;
+}
+
+function explicitPositive(value, pattern) {
+  const text = String(value || '');
+  if (!text || /\b(?:no|not|none|false)\b/i.test(text)) return false;
+  return /\b(?:yes|true|confirmed|active)\b/i.test(text) || pattern.test(text);
 }
 
 export function parseCsvStatement(text, fileName = 'statement.csv', accountHint = '') {

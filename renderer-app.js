@@ -1,9 +1,9 @@
 import {
   availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetRows,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  creditReportDebtStatus, creditReportStatusConflict, findSavingsOpportunities, formatCurrency, formatDate,
-  hasCompletedCheckIn, planCreditReportAccounts
+  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn
 } from './finance-core.js';
+import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
 import {
   applyUpdateStatus, createUpdateUiState, dismissUpdateNotification as dismissUpdateUiNotification,
@@ -643,12 +643,19 @@ function showNextImport() {
   clear(byId('importChanges'));
   byId('importChanges').hidden = true;
   if (preview.kind === 'credit-report') {
-    const report = preview.records[0];
-    currentImport.creditPlan = report ? creditReportAdditionPlan(report) : [];
-    const newBalances = currentImport.creditPlan.filter((item) => item.action === 'add-debt' || item.action === 'add-overdraft').length;
-    const updates = currentImport.creditPlan.filter((item) => item.action === 'existing').length;
+    currentImport.creditPlan = buildCreditReportImportPlan(state, preview, currentImport.document.id);
+    const counts = currentImport.creditPlan.counts;
     const score = preview.summary.score == null ? 'Not detected' : `${preview.summary.score}${preview.summary.scoreMaximum ? ` / ${preview.summary.scoreMaximum}` : ''}`;
-    append(summary, summaryTile('Provider', preview.summary.provider || 'Unknown'), summaryTile('Report date', preview.summary.reportDate ? formatDate(preview.summary.reportDate) : 'Not detected'), summaryTile('Score', score), summaryTile('Debt sync', `${newBalances} new · ${updates} update${updates === 1 ? '' : 's'}`));
+    append(summary,
+      summaryTile('Provider', preview.summary.provider || 'Unknown'),
+      summaryTile('Report date', preview.summary.reportDate ? formatDate(preview.summary.reportDate) : 'Not detected'),
+      summaryTile('Score', score),
+      summaryTile('Accounts found', counts.total),
+      summaryTile('Matched', counts.match + counts.update + counts.conflict),
+      summaryTile('New', counts.new),
+      summaryTile('Needs review', counts.review + counts.conflict)
+    );
+    renderCreditReportChanges(currentImport.creditPlan);
   } else if (preview.kind === 'payslip') {
     append(summary, summaryTile('Period', monthLabel(preview.summary.period)), summaryTile('Gross', formatCurrency(preview.summary.gross)), summaryTile('Deductions', formatCurrency(preview.summary.deductions)), summaryTile('Net', formatCurrency(preview.summary.net)));
   } else {
@@ -667,11 +674,11 @@ function showNextImport() {
     renderStatementChanges(plan);
   }
   const warning = byId('importWarnings');
-  const messages = [...(currentImport.statementPlan?.warnings || preview.warnings), ...preview.rejected.map((item) => `Row ${item.row || '—'}: ${item.reason}`)];
+  const messages = [...(currentImport.statementPlan?.warnings || currentImport.creditPlan?.warnings || preview.warnings), ...preview.rejected.map((item) => `Row ${item.row || '—'}: ${item.reason}`)];
   warning.hidden = !messages.length; warning.textContent = messages.join('\n');
   renderImportPreview(preview);
-  byId('confirmImportButton').disabled = preview.kind === 'statement' ? !currentImport.statementPlan.canApply : !preview.records.length;
-  byId('confirmImportButton').textContent = preview.kind === 'credit-report' ? 'Save report and sync debts' : 'Import reviewed records';
+  byId('confirmImportButton').disabled = preview.kind === 'statement' ? !currentImport.statementPlan.canApply : preview.kind === 'credit-report' ? !currentImport.creditPlan.canApply : !preview.records.length;
+  byId('confirmImportButton').textContent = preview.kind === 'credit-report' ? 'Apply reviewed credit report' : 'Import reviewed records';
   byId('importDialog').showModal();
 }
 
@@ -683,7 +690,7 @@ function renderImportPreview(preview) {
     : preview.kind === 'payslip' ? ['Period', 'Gross', 'Deductions', 'Net'] : ['Date', 'Description', 'Incoming', 'Outgoing', 'Balance', 'Action'];
   headers.forEach((label) => headerRow.append(element('th', '', label))); head.append(headerRow);
   if (preview.kind === 'credit-report') {
-    const plan = currentImport?.creditPlan || [];
+    const plan = currentImport?.creditPlan?.accountPlans || [];
     if (!plan.length) {
       const row = document.createElement('tr'); const empty = cell('No structured account rows detected. The PDF can still be stored securely.'); empty.colSpan = 5; row.append(empty); body.append(row);
       return;
@@ -712,11 +719,16 @@ async function confirmCurrentImport(event) {
   const preview = currentImport.preview;
   let completionMessage = 'Reviewed records imported.';
   if (preview.kind === 'credit-report') {
-    const report = preview.records[0];
-    state.creditReports ||= [];
-    if (report && !state.creditReports.some((item) => item.id === report.id || item.sourceDocumentId === report.sourceDocumentId)) state.creditReports.push(report);
-    const added = applyCreditReportPlan(report, currentImport.creditPlan || []);
-    completionMessage = `Credit report saved. ${added.debts} debt${added.debts === 1 ? '' : 's'} and ${added.overdrafts} overdraft${added.overdrafts === 1 ? '' : 's'} added; ${added.updated} tracked balance${added.updated === 1 ? '' : 's'} updated.`;
+    const applied = applyCreditReportImportPlan(state, preview, currentImport.creditPlan, currentImport.document.id);
+    await saveState(applied.state);
+    const result = applied.result;
+    completionMessage = `Credit report imported. ${result.addedDebts} debt${result.addedDebts === 1 ? '' : 's'} and ${result.addedOverdrafts} overdraft${result.addedOverdrafts === 1 ? '' : 's'} added; ${result.updated} tracked account${result.updated === 1 ? '' : 's'} updated; ${result.review + result.conflicts} need${result.review + result.conflicts === 1 ? 's' : ''} review.`;
+    currentImport = null;
+    byId('importDialog').close('confirmed');
+    render();
+    showToast(completionMessage);
+    showNextImport();
+    return;
   } else if (preview.kind === 'payslip') {
     for (const record of preview.records) if (!state.payslips.some((item) => item.id === record.id)) state.payslips.push(record);
   } else {
@@ -803,92 +815,35 @@ async function handleImportDialogClosed() {
   showNextImport();
 }
 
-function creditReportAdditionPlan(report) {
-  return planCreditReportAccounts(state.debts, state.overdrafts, report?.accounts || []);
-}
-
-function applyCreditReportPlan(report, plan) {
-  const added = { debts: 0, overdrafts: 0, updated: 0 };
-  for (const item of plan) {
-    const account = item.account;
-    if (item.action === 'existing') {
-      const collection = item.kind === 'overdraft' ? state.overdrafts : state.debts;
-      const existing = collection.find((entry) => entry.id === item.existingId);
-      if (existing) {
-        applyReportedAccountFields(existing, account, report);
-        added.updated += 1;
-      }
-      continue;
-    }
-    if (!['add-debt', 'add-overdraft'].includes(item.action)) continue;
-    const common = {
-      name: account.lender || 'Reported account',
-      currentBalance: Number(account.currentBalance || 0),
-      apr: account.apr ?? null,
-      contractualPayment: account.contractualPayment ?? null,
-      creditLimit: account.creditLimit ?? null,
-      originalBalance: account.originalBalance ?? null,
-      openedDate: account.openedDate || '',
-      defaultDate: account.defaultDate || '',
-      lastReportedAt: account.updatedDate || report.reportDate || '',
-      reportedStatus: account.status || '',
-      status: creditReportDebtStatus(account.status),
-      includeInPlan: true,
-      arrangementConfirmed: false,
-      arrangementStatus: 'unknown',
-      arrangementPayment: null,
-      arrearsAmount: null,
-      statusConflict: creditReportStatusConflict(account.status),
-      interestFrozen: false,
-      planPriority: 999,
-      accountReference: account.accountReference || '',
-      sourceCreditReportId: report.id,
-      sourceCreditAccountId: account.id,
-      description: `Imported from ${report.provider} credit report${report.reportDate ? ` dated ${formatDate(report.reportDate)}` : ''}.`,
-      notes: 'Confirm the APR, minimum payment and current balance against the lender before planning overpayments.',
-      updatedAt: new Date().toISOString()
-    };
-    if (item.action === 'add-overdraft') {
-      state.overdrafts.push({ id: createId('overdraft'), ...common, type: 'overdraft', accountId: '', limit: account.creditLimit ?? null });
-      added.overdrafts += 1;
-    } else {
-      state.debts.push({ id: createId('debt'), ...common, type: account.accountType || 'Credit report account' });
-      added.debts += 1;
-    }
-  }
-  return added;
-}
-
-function applyReportedAccountFields(existing, account, report) {
-  if (account.currentBalance !== null && account.currentBalance !== undefined && Number.isFinite(Number(account.currentBalance))) existing.currentBalance = Number(account.currentBalance);
-  if (account.apr !== null && account.apr !== undefined) existing.apr = account.apr;
-  if (account.contractualPayment !== null && account.contractualPayment !== undefined) existing.contractualPayment = account.contractualPayment;
-  if (account.creditLimit !== null && account.creditLimit !== undefined) {
-    existing.creditLimit = account.creditLimit;
-    if ('limit' in existing) existing.limit = account.creditLimit;
-  }
-  if (account.originalBalance !== null && account.originalBalance !== undefined) existing.originalBalance = account.originalBalance;
-  if (account.openedDate) existing.openedDate = account.openedDate;
-  if (account.defaultDate) existing.defaultDate = account.defaultDate;
-  if (account.accountReference) existing.accountReference = account.accountReference;
-  if (account.status) {
-    existing.reportedStatus = account.status;
-    const reportedStatus = creditReportDebtStatus(account.status);
-    const previousStatus = existing.status || 'unknown';
-    existing.statusConflict = Boolean(existing.statusConflict) || creditReportStatusConflict(account.status) || (reportedStatus !== 'unknown' && previousStatus !== 'unknown' && previousStatus !== reportedStatus);
-    if (previousStatus === 'unknown' && reportedStatus !== 'unknown') existing.status = reportedStatus;
-  }
-  existing.lastReportedAt = account.updatedDate || report.reportDate || existing.lastReportedAt || '';
-  existing.sourceCreditReportId = report.id;
-  existing.sourceCreditAccountId = account.id;
-  existing.updatedAt = new Date().toISOString();
-}
-
 function creditPlanLabel(item) {
-  if (item.action === 'add-debt') return 'Add as new debt';
-  if (item.action === 'add-overdraft') return 'Add as overdraft';
-  if (item.action === 'existing') return 'Update tracked balance';
-  return 'No balance — do not add';
+  if (item.category === 'new') return item.kind === 'overdraft' ? 'New · add as overdraft' : 'New · add as debt';
+  const balance = item.changes?.find((change) => change.field === 'currentBalance');
+  if (item.category === 'update' && balance?.apply) return `Update · ${formatCurrency(balance.from)} → ${formatCurrency(balance.to)}`;
+  if (item.category === 'update') return `Update · ${item.changes.filter((change) => change.apply).length} field${item.changes.filter((change) => change.apply).length === 1 ? '' : 's'}`;
+  if (item.category === 'match') return `Match · ${item.reason || 'unchanged'}`;
+  if (item.category === 'conflict' && balance && !balance.apply) return `Conflict · keep ${formatCurrency(balance.from)}`;
+  if (item.category === 'conflict') return 'Conflict · safer state kept';
+  if (item.category === 'review') return 'Needs review';
+  return 'Ignore historical / informational';
+}
+
+function renderCreditReportChanges(plan) {
+  const container = byId('importChanges');
+  clear(container);
+  const counts = plan.counts;
+  const changes = [
+    ['UPDATE', `${counts.update} account${counts.update === 1 ? '' : 's'} with dated field changes`],
+    ['NEW', `${counts.new} positive-balance account${counts.new === 1 ? '' : 's'} proposed`],
+    ['CONFLICT', `${counts.conflict} material conflict${counts.conflict === 1 ? '' : 's'} kept cautious`],
+    ['REVIEW', `${counts.review} ambiguous account${counts.review === 1 ? '' : 's'} left unchanged`],
+    ['HISTORY', `${counts.ignore} settled, zero-balance or informational account${counts.ignore === 1 ? '' : 's'}`]
+  ];
+  for (const [label, value] of changes) {
+    const item = element('div', 'import-change');
+    append(item, element('strong', '', label), element('span', '', value));
+    container.append(item);
+  }
+  container.hidden = false;
 }
 
 async function completeNextAction() {
