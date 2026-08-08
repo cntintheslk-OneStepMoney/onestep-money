@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const MONEY_PATTERN = /^(?:[-+]?\s*(?:£|GBP)?\s*[\d,]+\.\d{2}|\((?:£|GBP)?\s*[\d,]+\.\d{2}\))(?:\s*(?:CR|DR))?$/i;
 const MONTHS = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+const RECONCILIATION_TOLERANCE = 0.01;
 
 export function parseImportedDocument(fileName, payload, requestedKind = 'auto', accountHint = '') {
   const extension = path.extname(fileName).toLowerCase();
@@ -202,7 +203,7 @@ function nextUnlabelledValue(lines, index) {
 }
 
 function moneyFromText(value) {
-  const match = String(value || '').match(/(?:£|GBP)?\s*-?[\d,]+(?:\.\d{2})?(?:\s*(?:CR|DR))?/i);
+  const match = String(value || '').match(/(?:[-+]?\s*(?:£|GBP)?\s*[\d,]+(?:\.\d{2})?|\((?:£|GBP)?\s*[\d,]+(?:\.\d{2})?\))(?:\s*(?:CR|DR))?/i);
   return match ? parseMoney(match[0]) : null;
 }
 
@@ -231,6 +232,8 @@ export function parseCsvStatement(text, fileName = 'statement.csv', accountHint 
   const headers = rows[headerIndex].map((value) => normaliseHeader(value));
   const indices = {
     date: findHeader(headers, ['date', 'transaction date', 'posted date', 'posting date', 'booking date', 'completed date', 'effective date', 'value date']),
+    postingDate: findHeader(headers, ['posting date', 'posted date', 'booking date', 'completed date']),
+    valueDate: findHeader(headers, ['value date', 'effective date']),
     description: findHeader(headers, ['description', 'transaction description', 'details', 'merchant', 'payee', 'counter party', 'counterparty', 'narrative', 'reference', 'memo', 'name']),
     debit: findHeader(headers, ['debit', 'debit amount', 'money out', 'withdrawal', 'paid out', 'spent']),
     credit: findHeader(headers, ['credit', 'credit amount', 'money in', 'deposit', 'paid in', 'received']),
@@ -244,6 +247,8 @@ export function parseCsvStatement(text, fileName = 'statement.csv', accountHint 
   rows.slice(headerIndex + 1).forEach((row, offset) => {
     if (!row.some((cell) => String(cell).trim())) return;
     const date = parseDate(row[indices.date]);
+    const postingDate = indices.postingDate >= 0 ? parseDate(row[indices.postingDate]) : '';
+    const valueDate = indices.valueDate >= 0 ? parseDate(row[indices.valueDate]) : '';
     const description = String(row[indices.description] || '').trim();
     const debit = indices.debit >= 0 ? parseMoney(row[indices.debit]) : null;
     const credit = indices.credit >= 0 ? parseMoney(row[indices.credit]) : null;
@@ -259,9 +264,9 @@ export function parseCsvStatement(text, fileName = 'statement.csv', accountHint 
     if (!date) return rejected.push({ row: sourceRow, reason: 'Invalid or ambiguous date.' });
     if (!description) return rejected.push({ row: sourceRow, reason: 'Missing description.' });
     if (!incoming && !outgoing) return rejected.push({ row: sourceRow, reason: 'Missing or zero amount.' });
-    records.push(makeTransaction({ accountHint, date, description, incoming, outgoing, balance: indices.balance >= 0 ? parseMoney(row[indices.balance]) : null, bankType: indices.type >= 0 ? String(row[indices.type] || '').trim() : '', source: fileName, sourceRow }));
+    records.push(makeTransaction({ accountHint, date, postingDate, valueDate, description, incoming, outgoing, balance: indices.balance >= 0 ? parseMoney(row[indices.balance]) : null, bankType: indices.type >= 0 ? String(row[indices.type] || '').trim() : '', source: fileName, sourceRow }));
   });
-  return statementResult(records, rejected, [], accountHint, fileName);
+  return statementResult(records, rejected, [], accountHint, fileName, statementMetadataFromText(text, records, { parserConfidence: 'structured-export' }));
 }
 
 export function parseQifStatement(text, fileName = 'statement.qif', accountHint = '') {
@@ -276,7 +281,7 @@ export function parseQifStatement(text, fileName = 'statement.qif', accountHint 
     if (!date || amount === null || amount === 0) return rejected.push({ row: index + 1, reason: !date ? 'Invalid QIF date.' : 'Invalid QIF amount.' });
     records.push(makeTransaction({ accountHint, date, description: fields.P || fields.M || 'QIF transaction', incoming: amount > 0 ? amount : 0, outgoing: amount < 0 ? Math.abs(amount) : 0, source: fileName, sourceRow: index + 1 }));
   });
-  return statementResult(records, rejected, [], accountHint, fileName);
+  return statementResult(records, rejected, [], accountHint, fileName, statementMetadataFromText(text, records, { parserConfidence: 'structured-export' }));
 }
 
 export function parseOfxStatement(text, fileName = 'statement.ofx', accountHint = '') {
@@ -288,9 +293,19 @@ export function parseOfxStatement(text, fileName = 'statement.ofx', accountHint 
     const amount = parseMoney(tag(block, 'TRNAMT'));
     const description = tag(block, 'NAME') || tag(block, 'MEMO') || 'OFX transaction';
     if (!date || amount === null || amount === 0) return rejected.push({ row: index + 1, reason: !date ? 'Invalid OFX date.' : 'Invalid OFX amount.' });
-    records.push(makeTransaction({ accountHint, date, description, incoming: amount > 0 ? amount : 0, outgoing: amount < 0 ? Math.abs(amount) : 0, source: fileName, sourceRow: index + 1, sourceId: tag(block, 'FITID') }));
+    records.push(makeTransaction({ accountHint, date, description, incoming: amount > 0 ? amount : 0, outgoing: amount < 0 ? Math.abs(amount) : 0, source: fileName, sourceRow: index + 1, sourceId: tag(block, 'FITID'), reference: tag(block, 'REFNUM') || tag(block, 'MEMO') }));
   });
-  return statementResult(records, rejected, [], accountHint, fileName);
+  const metadata = statementMetadataFromText(text, records, {
+    institution: tag(text, 'ORG') || tag(text, 'BANKID'),
+    accountReference: safeAccountReference(tag(text, 'ACCTID')),
+    accountType: tag(text, 'ACCTTYPE'),
+    currency: normaliseCurrency(tag(text, 'CURDEF')),
+    statementStartDate: parseDate(tag(text, 'DTSTART')),
+    statementEndDate: parseDate(tag(text, 'DTEND')),
+    periodSource: tag(text, 'DTSTART') || tag(text, 'DTEND') ? 'explicit' : '',
+    parserConfidence: 'structured-export'
+  });
+  return statementResult(records, rejected, [], accountHint, fileName, metadata);
 }
 
 function parseJsonStatement(text, fileName, accountHint) {
@@ -307,7 +322,17 @@ function parseJsonStatement(text, fileName, accountHint) {
       if (!date || (!incoming && !outgoing)) return rejected.push({ row: index + 1, reason: !date ? 'Invalid JSON date.' : 'Missing JSON amount.' });
       records.push(makeTransaction({ ...entry, accountHint: entry.accountId || accountHint, date, incoming, outgoing, source: fileName, sourceRow: index + 1 }));
     });
-    return statementResult(records, rejected, [], accountHint, fileName);
+    const metadata = statementMetadataFromText('', records, Array.isArray(parsed) ? {} : {
+      institution: parsed.institution,
+      accountReference: safeAccountReference(parsed.accountNumber || parsed.accountReference),
+      accountType: parsed.accountType,
+      currency: normaliseCurrency(parsed.currency),
+      statementStartDate: parseDate(parsed.statementStartDate || parsed.startDate),
+      statementEndDate: parseDate(parsed.statementEndDate || parsed.endDate),
+      periodSource: parsed.statementStartDate || parsed.startDate || parsed.statementEndDate || parsed.endDate ? 'explicit' : '',
+      parserConfidence: 'structured-export'
+    });
+    return statementResult(records, rejected, [], accountHint, fileName, metadata);
   } catch {
     return rejectedImport('The JSON file is invalid.');
   }
@@ -325,20 +350,26 @@ export function parsePdfStatement(document, fileName, accountHint) {
   if (knownParsers[institution]) {
     const [parser, provider] = knownParsers[institution];
     const parsed = parser(document, fileName, accountHint || provider);
-    if (parsed.records.length) return enrichPdfStatement(parsed, document.text, provider);
+    if (parsed.records.length) return enrichPdfStatement(parsed, document.text, provider, 'provider-specific');
   }
   const generic = parseGenericPdfTable(document, fileName, accountHint || knownParsers[institution]?.[1] || '');
-  if (generic.records.length) return enrichPdfStatement(generic, document.text, knownParsers[institution]?.[1] || '');
+  if (generic.records.length) {
+    generic.warnings.push('This statement used the conservative generic PDF table parser. Check the account and balance summary before importing.');
+    return enrichPdfStatement(generic, document.text, knownParsers[institution]?.[1] || '', 'generic');
+  }
   return rejectedImport('This PDF layout is not recognised. Try the bank\'s CSV, QIF, OFX or QFX export; the encrypted original has still been kept for review.');
 }
 
-function enrichPdfStatement(result, text, institution) {
-  const overdraftLimit = findMoney(text, /(?:arranged|agreed)?\s*overdraft\s*(?:limit|facility|amount)?[\s:£]{0,20}([\d,]+\.\d{2})/i)
+function enrichPdfStatement(result, text, institution, parserConfidence) {
+  const overdraftLimit = findMoney(text, /(?:arranged|agreed)\s+overdraft\s*(?:limit|facility|amount)?[\s:£]{0,20}([\d,]+\.\d{2})/i)
     ?? findMoney(text, /(?:overdraft limit|overdraft facility)[\s\S]{0,40}?£?([\d,]+\.\d{2})/i);
   const overdraftRateText = String(text || '').match(/(?:arranged overdraft|overdraft interest)[\s\S]{0,180}?(?:EAR|APR|annual interest rate)[\s:]*(\d{1,3}(?:\.\d{1,3})?)\s*%/i)?.[0] || '';
   const overdraftApr = percentageFromText(overdraftRateText);
+  const metadata = statementMetadataFromText(text, result.records, { institution, parserConfidence });
   result.institution = institution;
-  result.summary = { ...result.summary, institution, overdraftLimit, overdraftApr };
+  result.accountIdentity = metadata.accountIdentity;
+  result.period = metadata.period;
+  result.summary = { ...result.summary, ...metadata.summary, institution, overdraftLimit, overdraftApr };
   return result;
 }
 
@@ -557,35 +588,53 @@ function reconcilePdf(records, text, accountHint, fileName, patterns) {
   }
   const incoming = roundMoney(records.reduce((sum, item) => sum + item.incoming, 0));
   const outgoing = roundMoney(records.reduce((sum, item) => sum + item.outgoing, 0));
-  if (records.length && records[0].runningBalance !== null) opening = roundMoney(records[0].runningBalance - records[0].incoming + records[0].outgoing);
-  if (records.length && records[records.length - 1].runningBalance !== null) closing = records[records.length - 1].runningBalance;
+  if (opening === null && records.length && records[0].runningBalance !== null) opening = roundMoney(records[0].runningBalance - records[0].incoming + records[0].outgoing);
+  if (closing === null && records.length && records[records.length - 1].runningBalance !== null) closing = records[records.length - 1].runningBalance;
   const expectedClosing = opening === null ? null : roundMoney(opening + incoming - outgoing);
-  const reconciled = opening !== null && closing !== null && Math.abs(expectedClosing - closing) <= 0.02;
+  const difference = expectedClosing === null || closing === null ? null : roundMoney(expectedClosing - closing);
+  const reconciled = opening !== null && closing !== null && Math.abs(difference) <= RECONCILIATION_TOLERANCE;
   if (!records.length) warnings.push('No transaction rows could be read from this PDF.');
-  if (records.length && !reconciled) warnings.push('The parsed transactions do not reconcile to the statement balances. Review the preview before importing.');
+  if (records.length && !reconciled) warnings.push(reconciliationWarning(difference));
+  const metadata = statementMetadataFromText(text, records);
   return {
     kind: 'statement', records, rejected: [], warnings, accountHint, source: fileName,
-    summary: { incoming, outgoing, openingBalance: opening, closingBalance: closing, expectedClosing }, reconciled
+    accountIdentity: metadata.accountIdentity, period: metadata.period,
+    summary: { incoming, outgoing, openingBalance: opening, closingBalance: closing, expectedClosing, reconciliationDifference: difference, ...metadata.summary }, reconciled
   };
 }
 
-function statementResult(records, rejected, warnings, accountHint, fileName) {
+function statementResult(records, rejected, warnings, accountHint, fileName, metadata = {}) {
   const ordered = chronologicalStatementRecords(records);
   const first = ordered.find((item) => Number.isFinite(item.runningBalance));
   const last = [...ordered].reverse().find((item) => Number.isFinite(item.runningBalance));
-  const openingBalance = first ? roundMoney(first.runningBalance - first.incoming + first.outgoing) : null;
-  const closingBalance = last?.runningBalance ?? null;
-  const balanceChainValid = statementBalanceChainValid(ordered);
+  const explicitOpening = metadata.summary?.explicitOpeningBalance;
+  const explicitClosing = metadata.summary?.explicitClosingBalance;
+  const openingBalance = Number.isFinite(explicitOpening) ? explicitOpening : first ? roundMoney(first.runningBalance - first.incoming + first.outgoing) : null;
+  const closingBalance = Number.isFinite(explicitClosing) ? explicitClosing : last?.runningBalance ?? null;
+  const hasCompleteRunningChain = ordered.length > 0 && ordered.every((item) => Number.isFinite(item.runningBalance));
+  const balanceChainValid = hasCompleteRunningChain ? statementBalanceChainValid(ordered) : Number.isFinite(explicitOpening) && Number.isFinite(explicitClosing);
+  const incoming = roundMoney(records.reduce((sum, item) => sum + item.incoming, 0));
+  const outgoing = roundMoney(records.reduce((sum, item) => sum + item.outgoing, 0));
+  const expectedClosing = openingBalance === null ? null : roundMoney(openingBalance + incoming - outgoing);
+  const reconciliationDifference = expectedClosing === null || closingBalance === null ? null : roundMoney(expectedClosing - closingBalance);
+  const reconciled = rejected.length === 0 && records.length > 0 && balanceChainValid
+    && reconciliationDifference !== null && Math.abs(reconciliationDifference) <= RECONCILIATION_TOLERANCE;
+  const nextWarnings = [...warnings];
+  if (records.length && !reconciled) nextWarnings.push(reconciliationWarning(reconciliationDifference));
   return {
-    kind: 'statement', records, rejected, warnings, accountHint, source: fileName,
+    kind: 'statement', records, rejected, warnings: [...new Set(nextWarnings)], accountHint, source: fileName,
+    accountIdentity: metadata.accountIdentity || {}, period: metadata.period || {},
     summary: {
-      incoming: roundMoney(records.reduce((sum, item) => sum + item.incoming, 0)),
-      outgoing: roundMoney(records.reduce((sum, item) => sum + item.outgoing, 0)),
+      incoming,
+      outgoing,
       count: records.length,
       openingBalance,
-      closingBalance
+      closingBalance,
+      expectedClosing,
+      reconciliationDifference,
+      ...(metadata.summary || {})
     },
-    reconciled: rejected.length === 0 && records.length > 0 && balanceChainValid
+    reconciled
   };
 }
 
@@ -610,12 +659,13 @@ function chronologicalStatementRecords(records) {
 }
 
 function statementBalanceChainValid(records) {
+  if (!records.length || records.some((item) => !Number.isFinite(item.runningBalance))) return false;
   for (let index = 1; index < records.length; index += 1) {
     const previous = records[index - 1];
     const current = records[index];
     if (!Number.isFinite(previous.runningBalance) || !Number.isFinite(current.runningBalance)) continue;
     const expected = roundMoney(previous.runningBalance + current.incoming - current.outgoing);
-    if (Math.abs(expected - current.runningBalance) > 0.02) return false;
+    if (Math.abs(expected - current.runningBalance) > RECONCILIATION_TOLERANCE) return false;
   }
   return true;
 }
@@ -628,20 +678,26 @@ function makeTransaction(input) {
   const classified = classifyTransaction(description, incoming, outgoing);
   return {
     id: stableId('transaction', input.accountHint, date, description, incoming, outgoing, input.sourceId || input.sourceRow),
-    accountId: input.accountHint || '', date, budgetMonth: date?.slice(0, 7) || '',
+    accountId: input.accountHint || '', date, postingDate: parseDate(input.postingDate), valueDate: parseDate(input.valueDate), budgetMonth: date?.slice(0, 7) || '',
     description, userDescription: input.userDescription || '', notes: input.notes || '',
     incoming, outgoing, runningBalance: input.balance ?? input.runningBalance ?? null,
     category: input.category || classified.category,
     transferStatus: input.transferStatus || classified.transferStatus, recurring: input.recurring ?? classified.recurring, cleared: true,
-    source: input.source || 'manual', sourceRow: input.sourceRow || null, bankType: input.bankType || ''
+    source: input.source || 'manual', sourceRow: input.sourceRow || null, bankType: input.bankType || '',
+    providerTransactionId: String(input.sourceId || input.providerTransactionId || '').trim(),
+    reference: String(input.reference || '').trim(), transactionType: input.transactionType || classified.transactionType
   };
 }
 
 function classifyTransaction(description, incoming, outgoing) {
   const text = description.toLowerCase();
-  if (incoming > 0) return { category: /pay office|salary|payroll|wages/.test(text) ? 'Income - pay' : 'Income / refund', transferStatus: /own account|internal transfer|account transfer/.test(text) ? 'possible' : 'no', recurring: false };
+  if (incoming > 0) {
+    const interest = /interest (?:paid|received|credit)|credit interest/.test(text);
+    return { category: interest ? 'Interest received' : /pay office|salary|payroll|wages/.test(text) ? 'Income - pay' : 'Income / refund', transferStatus: /own account|internal transfer|account transfer/.test(text) ? 'possible' : 'no', recurring: false, transactionType: interest ? 'interest' : 'income' };
+  }
   const rules = [
-    [/daily od int|overdraft fees|foreign currency transaction fee/, 'Overdraft interest & fees'],
+    [/daily od int|overdraft interest|interest charged|debit interest/, 'Interest charged'],
+    [/overdraft fee|account fee|returned payment charge|foreign currency transaction fee|cash withdrawal fee/, 'Bank fees'],
     [/loan payment|credit card payment|debt payment|finance payment/, 'Debt payment'],
     [/insurance|assurance/, 'Insurance'],
     [/shell|esso|bp |petrol|diesel|filling station|service station/, 'Fuel'],
@@ -653,7 +709,97 @@ function classifyTransaction(description, incoming, outgoing) {
     [/savings|investment contribution/, 'Savings']
   ];
   const category = rules.find(([pattern]) => pattern.test(text))?.[1] || 'Other / review';
-  return { category, transferStatus: /own account|internal transfer|account transfer/.test(text) ? 'possible' : 'no', recurring: /direct debit|standing order|recurring/.test(text) };
+  const transactionType = category === 'Bank fees' ? 'fee' : category === 'Interest charged' ? 'interest' : 'expense';
+  return { category, transferStatus: /own account|internal transfer|account transfer/.test(text) ? 'possible' : 'no', recurring: /direct debit|standing order|recurring/.test(text), transactionType };
+}
+
+function statementMetadataFromText(text, records = [], overrides = {}) {
+  const source = String(text || '');
+  const dates = records.map((item) => item.date).filter(Boolean).sort();
+  const explicit = statementPeriodFromText(source);
+  const statementStartDate = overrides.statementStartDate || explicit.start || dates[0] || '';
+  const statementEndDate = overrides.statementEndDate || explicit.end || dates.at(-1) || '';
+  const periodSource = overrides.periodSource || (explicit.start || explicit.end ? 'explicit' : dates.length ? 'transactions' : 'unknown');
+  const detectedInstitution = institutionDisplayName(detectInstitution(source))
+    || labelledValue(source, /(?:financial institution|institution|bank|provider)/i);
+  const institution = String(overrides.institution || detectedInstitution || '').trim();
+  const labelledReference = labelledValue(source, /(?:account number|account no\.?|account reference)/i);
+  const labelledSortCode = labelledValue(source, /sort code/i);
+  const accountReference = safeAccountReference(overrides.accountReference || labelledReference);
+  const sortCodeReference = safeAccountReference(overrides.sortCodeReference || labelledSortCode);
+  const accountType = String(overrides.accountType || labelledValue(source, /account type/i) || '').trim();
+  const currency = normaliseCurrency(overrides.currency) || currencyFromText(source);
+  const explicitOpeningBalance = labelledMoney(source, /(?:opening balance|balance brought forward|previous balance|starting balance)/i);
+  const explicitClosingBalance = labelledMoney(source, /(?:closing balance|balance carried forward|new balance|statement balance)/i);
+  const accountIdentity = { institution, accountReference, sortCodeReference, accountType, currency };
+  const period = { startDate: statementStartDate, endDate: statementEndDate, source: periodSource };
+  return {
+    accountIdentity,
+    period,
+    summary: {
+      institution,
+      accountReference,
+      sortCodeReference,
+      accountType,
+      currency,
+      statementStartDate,
+      statementEndDate,
+      statementPeriodSource: periodSource,
+      parserConfidence: overrides.parserConfidence || '',
+      explicitOpeningBalance,
+      explicitClosingBalance
+    }
+  };
+}
+
+function statementPeriodFromText(value) {
+  const text = normaliseWhitespace(value);
+  const datePart = '(\\d{1,2}[/-]\\d{1,2}[/-](?:\\d{4}|\\d{2})|\\d{1,2}\\s+[A-Za-z]{3,9}\\s+(?:\\d{4}|\\d{2})|\\d{4}[-/]\\d{1,2}[-/]\\d{1,2})';
+  const range = text.match(new RegExp(`(?:statement\\s+period|period|from)\\s*:?\\s*${datePart}\\s*(?:to|until|through|[-–—])\\s*${datePart}`, 'i'));
+  if (range) return { start: parseDate(range[1]), end: parseDate(range[2]) };
+  const start = text.match(new RegExp(`(?:statement\\s+(?:start|from)|period\\s+(?:start|from))\\s*:?\\s*${datePart}`, 'i'));
+  const end = text.match(new RegExp(`(?:statement\\s+(?:end|to|date)|period\\s+(?:end|to))\\s*:?\\s*${datePart}`, 'i'));
+  return { start: start ? parseDate(start[1]) : '', end: end ? parseDate(end[1]) : '' };
+}
+
+function labelledValue(text, labelPattern) {
+  const match = String(text || '').match(new RegExp(`(?:^|\\n)[ \\t]*${labelPattern.source}[ \\t]*:?[ \\t]*([^\\r\\n]{1,80})`, 'i'));
+  return match?.[1]?.trim() || '';
+}
+
+function labelledMoney(text, labelPattern) {
+  const value = labelledValue(text, labelPattern);
+  return value ? moneyFromText(value) : null;
+}
+
+function safeAccountReference(value) {
+  const compact = String(value || '').replace(/[^A-Za-z0-9]/g, '');
+  const visible = compact.slice(-4);
+  return visible ? `••••${visible.toUpperCase()}` : '';
+}
+
+function normaliseCurrency(value) {
+  const currency = String(value || '').trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : '';
+}
+
+function currencyFromText(value) {
+  const text = String(value || '');
+  const explicit = text.match(/\b(GBP|USD|EUR|AUD|CAD|NZD|JPY|CHF)\b/i)?.[1];
+  if (explicit) return explicit.toUpperCase();
+  if (/£/.test(text)) return 'GBP';
+  if (/€/.test(text)) return 'EUR';
+  if (/\$/.test(text)) return 'USD';
+  return '';
+}
+
+function institutionDisplayName(key) {
+  return ({ monzo: 'Monzo', halifax: 'Halifax', lloyds: 'Lloyds', 'bank-of-scotland': 'Bank of Scotland', nationwide: 'Nationwide' })[key] || '';
+}
+
+function reconciliationWarning(difference) {
+  if (!Number.isFinite(difference)) return 'Balance could not be reconciled because reliable opening, running and closing balances were not all available. OneStep will not update the account balance.';
+  return `Balance could not be reconciled. The transactions differ from the reported closing balance by £${Math.abs(difference).toFixed(2)}. OneStep will not update the account balance.`;
 }
 
 function namedAmounts(text, labels, type) {
