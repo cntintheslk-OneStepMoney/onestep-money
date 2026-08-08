@@ -155,8 +155,11 @@ test('restoring a validated backup exits recovery only after the restored state 
   assert.equal(restored.state.profile.name, 'Restored User');
   assert.deepEqual(await fs.readFile(harness.store.statePath), backup);
   const recoveryCopies = await fs.readdir(harness.store.recoveryPath);
-  assert.equal(recoveryCopies.length, 1);
-  assert.deepEqual(await fs.readFile(path.join(harness.store.recoveryPath, recoveryCopies[0])), original);
+  assert.ok(recoveryCopies.length >= 2);
+  const originalCopy = recoveryCopies.find((name) => name.startsWith('finance-state.recovery-'));
+  assert.ok(originalCopy);
+  assert.deepEqual(await fs.readFile(path.join(harness.store.recoveryPath, originalCopy)), original);
+  assert.ok(recoveryCopies.some((name) => name.endsWith('.osmb-set')));
 });
 
 test('a corrupt selected backup cannot replace the active state', async (t) => {
@@ -171,7 +174,7 @@ test('a corrupt selected backup cannot replace the active state', async (t) => {
   const result = await harness.store.restoreRecoveryBackup(invalidBackup.id);
 
   assert.equal(result.status, 'recovery_required');
-  assert.equal(result.recovery.lastOperationError, 'restore_failed');
+  assert.equal(result.recovery.lastOperationError, 'backup_not_found');
   assert.deepEqual(await fs.readFile(harness.store.statePath), original);
 });
 

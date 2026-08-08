@@ -20,6 +20,8 @@ let currentState;
 let currentLoadResult;
 let diagnostics;
 let diagnosticPreviewCache;
+const pendingRestoreSelections = new Map();
+let activeRestore = null;
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'vault', privileges: { standard: true, secure: true, supportFetchAPI: false, stream: true } }]);
 
@@ -38,7 +40,7 @@ app.whenReady().then(async () => {
   await diagnostics.record('APP_STARTED');
   if (!diagnostics.encryptionAvailable()) await diagnostics.record('SECURE_STORAGE_UNAVAILABLE');
 
-  store = new FinanceDataStore(app.getPath('userData'), path.join(__dirname, 'seed-data.json'), diagnostics, { secureStorage: safeStorage });
+  store = new FinanceDataStore(app.getPath('userData'), path.join(__dirname, 'seed-data.json'), diagnostics, { secureStorage: safeStorage, appVersion: app.getVersion() });
   await store.initialise();
   currentLoadResult = await store.loadState();
   currentState = currentLoadResult.status === 'normal' ? currentLoadResult.state : null;
@@ -141,7 +143,14 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('recovery:retry', async () => applyRecoveryResult(await store.retryRecoveryLoad()));
-  ipcMain.handle('recovery:restore-backup', async (_event, backupId) => applyRecoveryResult(await store.restoreRecoveryBackup(backupId)));
+  ipcMain.handle('recovery:restore-backup', async (_event, backupId) => {
+    if (store.mode !== 'recovery_required') return { status: 'invalid_operation', mode: store.mode };
+    const backup = store.recoveryStatus()?.backups?.find((item) => item.id === String(backupId) && item.valid);
+    if (!backup) return { status: 'recovery_required', mode: store.mode, recovery: { ...store.recoveryStatus(), lastOperationError: 'backup_not_found' }, encryption: store.encryptionStatus() };
+    const token = crypto.randomUUID();
+    rememberRestoreSelection(token, { localBackupId: backup.id, recovery: true, recoveryReason: store.recoveryStatus()?.reasonCode });
+    return { canceled: false, token, backup: { backupId: backup.id, ...backup } };
+  });
   ipcMain.handle('recovery:fresh-start:request', async () => store.requestFreshStart());
   ipcMain.handle('recovery:fresh-start:cancel', async (_event, token) => store.cancelFreshStart(token));
   ipcMain.handle('recovery:fresh-start:confirm', async (_event, token) => applyRecoveryResult(await store.confirmFreshStart(token)));
@@ -244,18 +253,93 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('backup:restore', async (_event, passphrase) => {
+  ipcMain.handle('backup:select-restore', async (_event, passphrase) => {
     const blocked = blockedMutationResult();
     if (blocked) return blocked;
     try {
       const selection = await dialog.showOpenDialog(mainWindow, { title: 'Restore encrypted backup', properties: ['openFile'], filters: [{ name: 'OneStep Money backup', extensions: ['osmb', 'hfb'] }] });
       if (selection.canceled) return { canceled: true };
-      currentState = await store.restorePortableBackup(selection.filePaths[0], passphrase);
-      return { canceled: false, state: currentState };
+      const sourcePath = selection.filePaths[0];
+      const backup = await store.inspectPortableBackup(sourcePath, passphrase);
+      const token = crypto.randomUUID();
+      rememberRestoreSelection(token, { sourcePath, passphrase, fingerprint: backup.sourceFingerprint, recovery: false });
+      return { canceled: false, token, backup: { ...backup, sourceFingerprint: undefined } };
     } catch (error) {
       await diagnostics.record('BACKUP_RESTORE_FAILED', { error }).catch(() => {});
       throw error;
     }
+  });
+
+  ipcMain.handle('recovery:select-portable-backup', async (_event, passphrase) => {
+    if (store.mode !== 'recovery_required') return { status: 'invalid_operation', mode: store.mode };
+    try {
+      const selection = await dialog.showOpenDialog(mainWindow, { title: 'Choose an encrypted recovery backup', properties: ['openFile'], filters: [{ name: 'OneStep Money backup', extensions: ['osmb', 'hfb'] }] });
+      if (selection.canceled) return { canceled: true };
+      const sourcePath = selection.filePaths[0];
+      const backup = await store.inspectPortableBackup(sourcePath, passphrase);
+      const token = crypto.randomUUID();
+      rememberRestoreSelection(token, { sourcePath, passphrase, fingerprint: backup.sourceFingerprint, recovery: true, recoveryReason: store.recoveryStatus()?.reasonCode });
+      return { canceled: false, token, backup: { ...backup, sourceFingerprint: undefined } };
+    } catch (error) {
+      await diagnostics.record('BACKUP_RESTORE_FAILED', { error }).catch(() => {});
+      throw error;
+    }
+  });
+
+  ipcMain.handle('backup:restore', async (_event, token) => {
+    const pending = pendingRestoreSelections.get(String(token));
+    if (!pending || Date.now() > pending.expiresAt) {
+      pendingRestoreSelections.delete(String(token));
+      throw new Error('The restore confirmation expired. Select the backup again.');
+    }
+    if ((pending.recovery && store.mode !== 'recovery_required') || (!pending.recovery && store.mode !== 'normal')) {
+      return blockedMutationResult() || { status: 'invalid_operation', mode: store.mode };
+    }
+    pendingRestoreSelections.delete(String(token));
+    activeRestore = { token: String(token), cancelRequested: false, canCancel: true };
+    try {
+      const restoreOptions = {
+        onProgress: (progress) => {
+          if (activeRestore) activeRestore.canCancel = Boolean(progress.canCancel);
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('backup:restore-progress', progress);
+        },
+        shouldCancel: () => Boolean(activeRestore?.cancelRequested)
+      };
+      let result = pending.localBackupId
+        ? await store.restoreRecoveryBackup(pending.localBackupId, restoreOptions)
+        : await store.restorePortableBackup(pending.sourcePath, pending.passphrase, {
+          ...restoreOptions,
+          expectedFingerprint: pending.fingerprint,
+          allowRecovery: pending.recovery,
+          previousRecoveryReason: pending.recoveryReason
+        });
+      if (result.status === 'normal') result = { status: 'restored', state: result.state, backupId: pending.localBackupId };
+      if (result.status === 'restored') {
+        currentState = result.state;
+        currentLoadResult = { status: 'normal', mode: 'normal', source: 'restored_backup', state: currentState, encryption: store.encryptionStatus() };
+      } else if (result.status === 'rolled_back') {
+        currentState = result.state;
+        currentLoadResult = { status: 'normal', mode: 'normal', source: 'restore_rollback', state: currentState, encryption: store.encryptionStatus() };
+      } else if (result.status === 'recovery_required') {
+        applyRecoveryResult(result);
+      }
+      return { ...result, encryption: store.encryptionStatus() };
+    } catch (error) {
+      await diagnostics.record('BACKUP_RESTORE_FAILED', { error }).catch(() => {});
+      throw error;
+    } finally {
+      activeRestore = null;
+    }
+  });
+
+  ipcMain.handle('backup:restore-cancel', async (_event, token) => {
+    const key = String(token || '');
+    if (pendingRestoreSelections.delete(key)) return { canceled: true, phase: 'confirmation' };
+    if (activeRestore?.token === key && activeRestore.canCancel) {
+      activeRestore.cancelRequested = true;
+      return { canceled: true, phase: 'pre_commit' };
+    }
+    return { canceled: false, phase: activeRestore ? 'commit' : 'none' };
   });
 
   ipcMain.handle('llm:status', async (_event, model) => {
@@ -329,7 +413,20 @@ function registerIpcHandlers() {
 
 function blockedMutationResult() {
   if (!store || store.mode === 'normal') return null;
+  if (store.mode === 'restore_in_progress') return { status: 'blocked', mode: store.mode, reasonCode: 'restore_in_progress', message: 'Saving is paused while the backup restore is being verified.' };
+  if (store.mode === 'backup_in_progress') return { status: 'blocked', mode: store.mode, reasonCode: 'backup_in_progress', message: 'Saving is paused while a consistent backup is being created.' };
   return { status: 'blocked', mode: store.mode, reasonCode: 'recovery_mode_active', message: 'Saving is paused while financial data recovery is required.' };
+}
+
+function rememberRestoreSelection(token, selection) {
+  pendingRestoreSelections.clear();
+  const expiresAt = Date.now() + (10 * 60 * 1000);
+  pendingRestoreSelections.set(token, { ...selection, expiresAt });
+  const timer = setTimeout(() => {
+    const pending = pendingRestoreSelections.get(token);
+    if (pending?.expiresAt === expiresAt) pendingRestoreSelections.delete(token);
+  }, 10 * 60 * 1000);
+  timer.unref?.();
 }
 
 function applyRecoveryResult(result) {
