@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { DiagnosticLogger } from '../diagnostic-logger.js';
+
+test('diagnostics keep approved fault metadata and redact raw error details', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory);
+
+  await logger.initialise();
+  await logger.record('APP_STARTED', { arbitrary: 'must-not-be-stored' });
+  const result = await logger.record('DOCUMENT_IMPORT_FAILED', {
+    documentType: 'payslip',
+    fileType: '.pdf',
+    originalName: 'private-payslip.pdf',
+    error: new ReferenceError('DOMMatrix is not defined at C:\\Users\\Private\\pay.pdf account 12345678')
+  });
+
+  assert.equal(result.reference, 'PDF-104');
+  const report = await logger.buildReport();
+  assert.match(report.text, /PDF-104 DOCUMENT_IMPORT_FAILED/);
+  assert.match(report.text, /classification=PDF_RENDER_DOMMATRIX_MISSING/);
+  assert.match(report.text, /document_type=payslip file_type=pdf/);
+  assert.doesNotMatch(report.text, /private-payslip|12345678|C:\\Users|must-not-be-stored/);
+
+  const encryptedFile = await fs.readFile(path.join(directory, 'diagnostics', 'diagnostics-0.enc'), 'utf8');
+  assert.doesNotMatch(encryptedFile, /DOMMatrix|12345678|Private/);
+});
+
+test('detailed diagnostics are not written when secure storage is unavailable', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory, false);
+
+  await logger.initialise();
+  await logger.record('APP_STARTED');
+  await logger.record('SECURE_STORAGE_UNAVAILABLE');
+  const result = await logger.record('STATE_SAVE_FAILED', { error: new Error('private detail') });
+  const report = await logger.buildReport();
+
+  assert.equal(result.stored, false);
+  assert.equal(report.entryCount, 2);
+  assert.match(report.text, /minimal startup events are retained/);
+  await assert.rejects(fs.access(path.join(directory, 'diagnostics', 'diagnostics-0.enc')));
+});
+
+test('diagnostics expire after fourteen days and can be deleted locally', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let now = new Date('2026-08-01T12:00:00.000Z');
+  const logger = createLogger(directory, true, () => new Date(now));
+
+  await logger.record('APP_STARTED');
+  await logger.record('DOCUMENT_IMPORT_FAILED', { documentType: 'statement', fileType: 'csv', error: new Error('failure') });
+  now = new Date('2026-08-16T12:00:01.000Z');
+  assert.equal((await logger.buildReport()).entryCount, 0);
+
+  await logger.record('APP_READY');
+  assert.equal((await logger.buildReport()).entryCount, 1);
+  await logger.deleteAll();
+  assert.equal((await logger.buildReport()).entryCount, 0);
+});
+
+test('encrypted detail logs rotate within the configured file limit', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory, true, undefined, { maxFileBytes: 280, maxFiles: 3 });
+
+  for (let index = 0; index < 12; index += 1) {
+    await logger.record('STATE_SAVE_FAILED', { error: new Error(`failure ${index}`) });
+  }
+  const files = (await fs.readdir(path.join(directory, 'diagnostics'))).filter((name) => /^diagnostics-\d+\.enc$/.test(name));
+  assert.ok(files.length <= 3);
+  assert.ok(files.includes('diagnostics-0.enc'));
+});
+
+function createLogger(directory, available = true, clock, extra = {}) {
+  const secureStorage = {
+    isEncryptionAvailable: () => available,
+    encryptString: (value) => Buffer.from(value, 'utf8'),
+    decryptString: (value) => value.toString('utf8')
+  };
+  return new DiagnosticLogger(directory, {
+    secureStorage,
+    appVersion: '2.1.1',
+    platform: 'win32',
+    architecture: 'x64',
+    clock,
+    ...extra
+  });
+}

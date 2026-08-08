@@ -25,6 +25,7 @@ if (Number(seed.settings?.extraDebtPayment || 0) !== 0) throw new Error('Public 
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 if (packageJson.name !== 'onestep-money' || packageJson.build?.productName !== 'OneStep Money') throw new Error('Package branding is inconsistent.');
 if (!packageJson.dependencies?.['electron-updater']) throw new Error('The installed update channel is not configured.');
+if (!packageJson.build?.files?.includes('diagnostic-logger.js')) throw new Error('The diagnostic logger is missing from packaged builds.');
 
 console.log(JSON.stringify({ javascriptFiles: javascript.length, seedCollections: emptyCollections.length, package: packageJson.name, version: packageJson.version }));
 
