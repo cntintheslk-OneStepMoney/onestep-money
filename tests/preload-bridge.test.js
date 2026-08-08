@@ -56,7 +56,10 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   await exposed.api.exportDiagnostics('preview-token');
   await exposed.api.deleteDiagnostics();
   await exposed.api.recordRendererFault('RENDERER_UNHANDLED_ERROR');
+  await exposed.api.getUpdateStatus();
   await exposed.api.checkForUpdates();
+  await exposed.api.openAvailableUpdate();
+  assert.equal(exposed.api.installUpdate, undefined);
   assert.deepEqual(invocations, [
     ['app:version'],
     ['state:load'],
@@ -76,13 +79,15 @@ test('sandboxed preload exposes the complete desktop API', async () => {
     ['diagnostics:export', 'preview-token'],
     ['diagnostics:delete'],
     ['diagnostics:renderer-fault', 'RENDERER_UNHANDLED_ERROR'],
-    ['update:check']
+    ['update:get-status'],
+    ['update:check'],
+    ['update:open-release']
   ]);
 
   let updateStatus;
   const unsubscribe = exposed.api.onUpdateStatus((status) => { updateStatus = status; });
-  listeners.get('update:status')({}, { state: 'ready' });
-  assert.deepEqual(updateStatus, { state: 'ready' });
+  listeners.get('update:status')({}, { state: 'available', version: '2.1.11' });
+  assert.deepEqual(updateStatus, { state: 'available', version: '2.1.11' });
   unsubscribe();
   assert.equal(listeners.has('update:status'), false);
 
