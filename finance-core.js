@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -87,10 +87,17 @@ export function buildNextAction(state, now = new Date()) {
     return isSnoozed(firstImport.id) ? checkIn : firstImport;
   }
 
-  const overLimit = (state.overdrafts || []).find((item) => item.status === 'over_limit');
-  if (overLimit && !isSnoozed('generated-overlimit')) return { id: 'generated-overlimit', title: `Check ${overLimit.name}`, detail: 'Confirm the balance and ask about an affordable plan before making an extra debt payment.', timeframe: '10 min', stage: 'today' };
-  const arrears = [...(state.overdrafts || []), ...(state.debts || [])].find((item) => ['arrears', 'defaulted'].includes(item.status));
-  if (arrears && !isSnoozed('generated-arrears')) return { id: 'generated-arrears', title: `Confirm the plan for ${arrears.name}`, detail: 'Record the agreed payment and whether interest or charges are frozen.', timeframe: '10 min', stage: 'this week' };
+  const safety = debtSafetyAssessment(state);
+  const conflict = safety.accounts.find((item) => item.reasonCodes.includes('conflicting_status'));
+  if (conflict && !isSnoozed('generated-debt-conflict')) return { id: 'generated-debt-conflict', title: `Check the status of ${conflict.name}`, detail: 'OneStep has conflicting information for this account. Confirm its current status before making an extra debt payment.', timeframe: '10 min', stage: 'today' };
+  const arrangement = safety.accounts.find((item) => ['default_arrangement_unresolved', 'arrears_arrangement_unresolved', 'unknown_arrangement', 'unknown_arrangement_payment'].some((code) => item.reasonCodes.includes(code)));
+  if (arrangement && !isSnoozed('generated-arrangement')) return { id: 'generated-arrangement', title: 'Check your payment arrangement', detail: `OneStep does not yet have enough confirmed arrangement information for ${arrangement.name} to recommend an extra payment safely.`, timeframe: '10 min', stage: 'today' };
+  const missing = safety.accounts.find((item) => ['unknown_status', 'unknown_required_payment', 'unknown_credit_limit'].some((code) => item.reasonCodes.includes(code)));
+  if (missing && !isSnoozed('generated-debt-details')) return { id: 'generated-debt-details', title: `Confirm the details for ${missing.name}`, detail: 'Check the account status, required payment and limit where relevant. Unknown information is not being treated as safe.', timeframe: '10 min', stage: 'this week' };
+  const overLimit = safety.accounts.find((item) => item.overLimit);
+  if (overLimit && !isSnoozed('generated-overlimit')) return { id: 'generated-overlimit', title: `Check ${overLimit.name}`, detail: 'Confirm the amount above the limit and protect essential payments before making an optional payment elsewhere.', timeframe: '10 min', stage: 'today' };
+  const arrears = safety.accounts.find((item) => ['arrears', 'defaulted'].includes(item.effectiveStatus));
+  if (arrears && !isSnoozed('generated-arrears')) return { id: 'generated-arrears', title: `Confirm the plan for ${arrears.name}`, detail: arrears.arrangementStatus === 'confirmed' ? 'The agreed payment is protected. Check that the recorded amount and account status are still current.' : 'Record the agreed payment and whether interest or charges are frozen.', timeframe: '10 min', stage: 'this week' };
   if (!isSnoozed(checkIn.id)) return checkIn;
   return { id: 'generated-paused', title: 'Nothing else needs your attention today', detail: 'Your available steps are snoozed. Come back tomorrow, or use another page if you choose to update something now.', timeframe: 'Done', stage: 'today', passive: true };
 }
@@ -119,11 +126,15 @@ export function buildFinancialChecks(state, month = state.settings?.selectedMont
   ];
   const summary = calculatePeriodSummary(state, month);
   const checks = [];
-  const overLimit = (state.overdrafts || []).find((item) => item.status === 'over_limit');
-  const arrears = [...(state.overdrafts || []), ...(state.debts || [])].filter((item) => ['arrears', 'defaulted'].includes(item.status));
-  if (overLimit) checks.push({ tone: 'urgent', title: 'Stabilise the overdraft first', text: `${overLimit.name} is ${formatCurrency(overLimit.currentBalance)} overdrawn${overLimit.limit ? ` against a ${formatCurrency(overLimit.limit)} limit` : ''}. Confirm essential payments before overpaying another account.` });
-  if (arrears.length) checks.push({ tone: 'warning', title: 'Plans still need confirming', text: `${arrears.length} account${arrears.length === 1 ? '' : 's'} are marked in arrears or defaulted. Record each agreed payment and whether charges are frozen.` });
-  if (summary.plannedMargin >= 0) checks.push({ tone: 'positive', title: 'Planned safety margin', text: `${formatCurrency(summary.plannedMargin)} remains after the amounts currently entered. Treat it as provisional until every essential bill is recorded.` });
+  const safety = debtSafetyAssessment(state);
+  const unsafe = safety.accounts.find((item) => item.blockingReasons.length);
+  const overLimit = safety.accounts.find((item) => item.overLimit);
+  const protectedArrangements = safety.accounts.filter((item) => item.arrangementStatus === 'confirmed' && ['arrears', 'defaulted'].includes(item.effectiveStatus));
+  if (unsafe) checks.push({ tone: 'warning', title: 'Extra payments paused for safety', text: unsafe.blockingReasons[0] });
+  if (overLimit) checks.push({ tone: 'urgent', title: 'Account above its limit', text: `${overLimit.name} is being prioritised as an over-limit account. Essential commitments still come before reducing it.` });
+  if (protectedArrangements.length) checks.push({ tone: 'neutral', title: 'Agreed payments protected', text: `${protectedArrangements.length} payment arrangement${protectedArrangements.length === 1 ? ' is' : 's are'} included as required spending. OneStep is not adding discretionary payments to those accounts.` });
+  if (summary.plannedMargin >= 0 && safety.plannedCapacity > 0) checks.push({ tone: 'positive', title: 'Provisional room after commitments', text: `${formatCurrency(safety.plannedCapacity)} remains after the budgets, required payments, scheduled commitments and selected buffer currently recorded. Treat it as provisional until every essential bill is entered.` });
+  else if (summary.plannedMargin >= 0) checks.push({ tone: 'neutral', title: 'No optional-payment room confirmed', text: 'The current plan does not leave money safely available for an optional payment after recorded commitments and the selected buffer.' });
   else checks.push({ tone: 'urgent', title: 'Plan is short', text: `The entered plan is ${formatCurrency(Math.abs(summary.plannedMargin))} over dependable income. Reduce flexible spending before adding an extra payment.` });
   const savings = findSavingsOpportunities(state);
   if (savings[0]) checks.push({ tone: 'neutral', title: 'Best penny-pinching review', text: savings[0].text });
@@ -148,14 +159,17 @@ export function findSavingsOpportunities(state) {
 }
 
 export function debtPlan(state, strategy = 'hybrid', extraPayment = state.settings?.extraDebtPayment ?? 0, startMonth = currentMonth()) {
+  const safety = debtSafetyAssessment(state, extraPayment);
+  const safetyById = new Map(safety.accounts.map((item) => [item.id, item]));
   const items = [...(state.debts || []).map((item) => ({ ...item, kind: 'debt' })), ...(state.overdrafts || []).map((item) => ({ ...item, kind: 'overdraft' }))]
     .filter((item) => item.includeInPlan !== false && Number(item.currentBalance || 0) > 0)
-    .map((item) => ({ ...item, balance: Number(item.currentBalance), apr: item.apr === null || item.apr === undefined ? null : Number(item.apr), minimum: Number(item.contractualPayment || item.minimumPayment || 0) }));
+    .map((item) => ({ ...item, balance: Number(item.currentBalance), apr: item.apr === null || item.apr === undefined ? null : Number(item.apr), minimum: Number(safetyById.get(item.id)?.requiredPayment || 0), safety: safetyById.get(item.id) }));
   const unknownApr = items.filter((item) => item.apr === null).map((item) => item.name);
   const minimumTotal = roundMoney(items.reduce((total, item) => total + item.minimum, 0));
-  const monthlyPot = roundMoney(minimumTotal + Math.max(0, Number(extraPayment || 0)));
+  const monthlyPot = roundMoney(minimumTotal + safety.safeExtraPayment);
   const schedule = [];
   const balances = new Map(items.map((item) => [item.id, item.balance]));
+  const initialPriority = priorityOrder(items, balances, strategy).map((item) => item.name);
   const date = new Date(`${startMonth}-01T00:00:00Z`);
   let totalInterest = 0;
 
@@ -164,7 +178,7 @@ export function debtPlan(state, strategy = 'hybrid', extraPayment = state.settin
     for (const item of items) {
       const balance = balances.get(item.id) || 0;
       if (balance <= 0) continue;
-      const interest = roundMoney(balance * ((item.apr || 0) / 12));
+      const interest = item.interestFrozen ? 0 : roundMoney(balance * ((item.apr || 0) / 12));
       balances.set(item.id, roundMoney(balance + interest));
       interestThisMonth += interest;
     }
@@ -192,12 +206,58 @@ export function debtPlan(state, strategy = 'hybrid', extraPayment = state.settin
     date.setUTCMonth(date.getUTCMonth() + 1);
   }
 
-  const unsafeStatuses = [...(state.debts || []), ...(state.overdrafts || [])].filter((item) => ['arrears', 'over_limit'].includes(item.status) && !item.arrangementConfirmed);
   return {
     strategy, schedule, unknownApr, minimumTotal, monthlyPot, totalInterest,
-    debtFreeMonth: schedule.at(-1)?.endingBalance === 0 ? schedule.at(-1).month : '',
-    safeToOverpay: unsafeStatuses.length === 0,
-    blockers: unsafeStatuses.map((item) => item.name)
+    requestedExtraPayment: safety.requestedExtraPayment,
+    safeExtraPayment: safety.safeExtraPayment,
+    debtFreeMonth: safety.blockingReasons.length === 0 && schedule.at(-1)?.endingBalance === 0 ? schedule.at(-1).month : '',
+    safeToOverpay: safety.safeToOverpay,
+    overpaymentStatus: safety.overpaymentStatus,
+    blockers: safety.blockers,
+    explanations: safety.explanations,
+    excludedAccounts: safety.accounts.filter((item) => !item.eligibleForExtra && item.balance > 0).map((item) => ({ name: item.name, reason: item.exclusionReason })),
+    priority: initialPriority
+  };
+}
+
+export function debtSafetyAssessment(state, extraPayment = state.settings?.extraDebtPayment ?? 0) {
+  const requestedExtraPayment = roundMoney(Math.max(0, Number(extraPayment || 0)));
+  const accounts = [...(state.debts || []).map((item) => ({ ...item, kind: 'debt' })), ...(state.overdrafts || []).map((item) => ({ ...item, kind: 'overdraft' }))]
+    .filter((item) => Number(item.currentBalance || 0) > 0)
+    .map(assessDebtAccount);
+  const blockingReasons = accounts.flatMap((item) => item.blockingReasons);
+  const blockers = [...new Set(accounts.filter((item) => item.blockingReasons.length).map((item) => item.name))];
+  const eligibleAccounts = accounts.filter((item) => item.eligibleForExtra);
+  const requiredPaymentTotal = roundMoney(accounts.reduce((total, item) => total + Number(item.requiredPayment || 0), 0));
+  const budgetedDebtPayments = roundMoney((state.budgets || []).filter((item) => normalise(item.section) === 'debt minimums').reduce((total, item) => total + Number(item.planned || 0), 0));
+  const unbudgetedRequiredPayments = roundMoney(Math.max(0, requiredPaymentTotal - budgetedDebtPayments));
+  const scheduledCommitments = roundMoney((state.scheduledPayments || [])
+    .filter((item) => item.includedInBudget !== true && !item.paidAt && !item.completedAt && !['paid', 'cancelled', 'canceled'].includes(normalise(item.status)))
+    .reduce((total, item) => total + Math.max(0, Number(item.amount ?? item.outgoing ?? item.payment ?? 0)), 0));
+  const plannedSpending = roundMoney((state.budgets || []).reduce((total, item) => total + Number(item.planned || 0), 0));
+  const dependableIncome = Math.max(0, Number(state.profile?.dependableIncome || 0));
+  const bufferReserve = roundMoney(Math.max(0, Number(state.settings?.emergencyBufferTarget || 0) - Number(state.settings?.emergencyBufferBalance || 0)));
+  const plannedCapacity = roundMoney(Math.max(0, dependableIncome - plannedSpending - unbudgetedRequiredPayments - scheduledCommitments - bufferReserve));
+  const cashAccounts = (state.accounts || []).filter((item) => item.active !== false && ['current', 'cash'].includes(normalise(item.type)) && item.currentBalance !== null && item.currentBalance !== undefined && item.currentBalance !== '' && Number.isFinite(Number(item.currentBalance)));
+  const currentCashCapacity = cashAccounts.length
+    ? roundMoney(Math.max(0, cashAccounts.reduce((total, item) => total + Number(item.currentBalance), 0) - scheduledCommitments - bufferReserve))
+    : null;
+  const capacity = roundMoney(Math.min(plannedCapacity, currentCashCapacity === null ? Number.POSITIVE_INFINITY : currentCashCapacity));
+  const canAllocateExtra = blockingReasons.length === 0 && eligibleAccounts.length > 0;
+  const safeExtraPayment = canAllocateExtra ? roundMoney(Math.min(requestedExtraPayment, capacity)) : 0;
+  const explanations = [...blockingReasons];
+  if (!eligibleAccounts.length && accounts.length && !blockingReasons.length) explanations.push('No recorded account is eligible for an optional additional payment. Agreed arrangements remain at their recorded payment amount.');
+  if (requestedExtraPayment > safeExtraPayment && canAllocateExtra) explanations.push(safeExtraPayment > 0
+    ? `Essential commitments, required payments and the selected buffer leave ${formatCurrency(safeExtraPayment)} of the requested extra payment safely available.`
+    : 'Essential commitments, required payments, scheduled bills or the selected buffer leave no money safely available for an extra payment.');
+  const safeToOverpay = blockingReasons.length === 0 && (requestedExtraPayment === 0 ? eligibleAccounts.length > 0 : safeExtraPayment === requestedExtraPayment);
+  const overpaymentStatus = requestedExtraPayment === 0 ? (blockingReasons.length ? 'blocked' : 'not_requested')
+    : safeExtraPayment === requestedExtraPayment && safeToOverpay ? 'safe'
+      : safeExtraPayment > 0 ? 'reduced' : 'blocked';
+  return {
+    accounts, requestedExtraPayment, safeExtraPayment, safeToOverpay, overpaymentStatus,
+    blockers, blockingReasons, explanations: [...new Set(explanations)], requiredPaymentTotal,
+    unbudgetedRequiredPayments, scheduledCommitments, plannedCapacity, currentCashCapacity
   };
 }
 
@@ -231,11 +291,16 @@ export function planCreditReportAccounts(debts = [], overdrafts = [], accounts =
 }
 
 export function creditReportDebtStatus(value) {
-  const text = String(value || '').toLowerCase();
-  if (/default/.test(text)) return 'defaulted';
-  if (/over limit/.test(text)) return 'over_limit';
-  if (/arrears|late|missed|delinquent/.test(text)) return 'arrears';
-  return 'current';
+  const signals = debtStatusSignals(value);
+  if (signals.has('defaulted')) return 'defaulted';
+  if (signals.has('arrears')) return 'arrears';
+  if (signals.has('over_limit')) return 'over_limit';
+  if (signals.has('current')) return 'current';
+  return 'unknown';
+}
+
+export function creditReportStatusConflict(value) {
+  return debtStatusSignals(value).size > 1;
 }
 
 export function syncStatementAccount(state, account, preview, documentId = '') {
@@ -263,6 +328,9 @@ export function syncStatementAccount(state, account, preview, documentId = '') {
       status: Number.isFinite(preview.summary.overdraftLimit) && used > preview.summary.overdraftLimit ? 'over_limit' : 'current',
       includeInPlan: true,
       arrangementConfirmed: false,
+      arrangementStatus: 'unknown',
+      arrangementPayment: null,
+      statusConflict: false,
       interestFrozen: false,
       planPriority: 999,
       description: 'Automatically kept in sync with the linked bank statement balance.',
@@ -314,20 +382,116 @@ export function buildFallbackAnswer(question, state) {
   }
   if (/debt|overdraft|pay off|avalanche|snowball/.test(query)) {
     const plan = debtPlan(state, 'hybrid');
-    const blocker = plan.safeToOverpay ? '' : ` First confirm arrangements for ${plan.blockers.join(' and ')}.`;
-    return `Your recorded debt and overdrafts total ${formatCurrency(summary.totalOwed)}.${blocker} The payoff forecast is provisional while ${plan.unknownApr.length} rate${plan.unknownApr.length === 1 ? ' is' : 's are'} unknown.`;
+    const safetyMessage = plan.safeToOverpay
+      ? ` The recorded extra-payment target is within the current safety checks.`
+      : ` No unsafe extra payment is included. ${plan.explanations[0] || 'OneStep does not have enough confirmed information to recommend one safely.'}`;
+    return `Your recorded debt and overdrafts total ${formatCurrency(summary.totalOwed)}.${safetyMessage} The payoff forecast is provisional while ${plan.unknownApr.length} rate${plan.unknownApr.length === 1 ? ' is' : 's are'} unknown.`;
   }
   return `Your selected month shows ${formatCurrency(summary.income)} external money in and ${formatCurrency(summary.spending)} out. The safest next move is: ${next.title}.`;
 }
 
 function priorityOrder(items, balances, strategy) {
-  return items.filter((item) => (balances.get(item.id) || 0) > 0).sort((left, right) => {
+  return items.filter((item) => (balances.get(item.id) || 0) > 0 && item.safety?.eligibleForExtra).sort((left, right) => {
+    const riskDifference = debtRiskRank(left.safety) - debtRiskRank(right.safety);
+    if (riskDifference) return riskDifference;
     if (strategy === 'snowball') return (balances.get(left.id) || 0) - (balances.get(right.id) || 0);
     if (strategy === 'hybrid') return Number(left.planPriority || 999) - Number(right.planPriority || 999);
     const leftApr = left.apr === null ? -1 : left.apr;
     const rightApr = right.apr === null ? -1 : right.apr;
     return rightApr - leftApr || (balances.get(left.id) || 0) - (balances.get(right.id) || 0);
   });
+}
+
+function assessDebtAccount(item) {
+  const balance = Math.max(0, Number(item.currentBalance || 0));
+  const storedStatus = normaliseDebtStatus(item.status);
+  const reportedStatus = creditReportDebtStatus(item.reportedStatus);
+  const statusSignals = new Set([storedStatus]);
+  if (reportedStatus !== 'unknown') statusSignals.add(reportedStatus);
+  if (item.defaultDate) statusSignals.add('defaulted');
+  const limit = debtLimit(item);
+  const overLimit = Number.isFinite(limit) && balance > limit;
+  if (overLimit) statusSignals.add('over_limit');
+  statusSignals.delete('unknown');
+  const effectiveStatus = conservativeDebtStatus(statusSignals);
+  const arrangementStatus = normaliseArrangementStatus(item);
+  const arrangementPayment = knownNonNegative(item.arrangementPayment) ? Number(item.arrangementPayment) : null;
+  const contractualPayment = knownNonNegative(item.contractualPayment ?? item.minimumPayment) ? Number(item.contractualPayment ?? item.minimumPayment) : null;
+  const requiredPayment = arrangementStatus === 'confirmed' ? arrangementPayment : contractualPayment;
+  const reportedConflict = storedStatus !== 'unknown' && reportedStatus !== 'unknown' && storedStatus !== reportedStatus;
+  const defaultDateConflict = Boolean(item.defaultDate) && !['defaulted', 'unknown'].includes(storedStatus);
+  const conflictingStatus = Boolean(item.statusConflict) || creditReportStatusConflict(item.reportedStatus) || reportedConflict || defaultDateConflict;
+  const blocking = [];
+  const reasonCodes = [];
+  const addBlock = (code, message) => { reasonCodes.push(code); blocking.push(message); };
+
+  if (conflictingStatus) addBlock('conflicting_status', `${item.name || 'This account'} has conflicting status information. OneStep is using the more cautious state and is not recommending an extra payment until it is confirmed.`);
+  if (effectiveStatus === 'unknown') addBlock('unknown_status', `OneStep does not know the current status of ${item.name || 'this account'}, so it cannot recommend an extra payment safely.`);
+  if (effectiveStatus === 'defaulted' && arrangementStatus !== 'confirmed') addBlock('default_arrangement_unresolved', `${item.name || 'This defaulted account'} is marked as defaulted, but its payment arrangement is not confirmed. No discretionary payment is being recommended.`);
+  else if (effectiveStatus === 'arrears' && arrangementStatus !== 'confirmed') addBlock('arrears_arrangement_unresolved', `${item.name || 'This account'} is in arrears and its required payment position is not confirmed. Optional overpayments are paused.`);
+  else if (arrangementStatus === 'unknown') addBlock('unknown_arrangement', `OneStep does not know whether ${item.name || 'this account'} has a payment arrangement, so it is not treating the account as safe to overpay.`);
+  if (arrangementStatus === 'confirmed' && arrangementPayment === null) addBlock('unknown_arrangement_payment', `The arrangement for ${item.name || 'this account'} is confirmed, but the agreed payment amount is missing. Confirm it before relying on the forecast.`);
+  if (arrangementStatus === 'none' && ['current', 'over_limit'].includes(effectiveStatus) && contractualPayment === null) addBlock('unknown_required_payment', `The required payment for ${item.name || 'this account'} is unknown. OneStep cannot safely calculate money available for an optional payment.`);
+  if ((item.kind === 'overdraft' || revolvingCredit(item)) && !Number.isFinite(limit)) addBlock('unknown_credit_limit', `The limit for ${item.name || 'this account'} is unknown, so OneStep cannot rule out an over-limit risk.`);
+
+  const eligibleForExtra = blocking.length === 0 && arrangementStatus === 'none' && ['current', 'over_limit'].includes(effectiveStatus);
+  let exclusionReason = '';
+  if (arrangementStatus === 'confirmed') exclusionReason = 'The agreed payment is treated as required; no additional discretionary payment is assigned.';
+  else if (effectiveStatus === 'defaulted') exclusionReason = 'Defaulted accounts are excluded from automatic discretionary overpayments.';
+  else if (effectiveStatus === 'arrears') exclusionReason = 'The arrears position must be resolved before optional overpayments elsewhere.';
+  else if (blocking[0]) exclusionReason = blocking[0];
+  return {
+    id: item.id, name: item.name || 'Unnamed account', kind: item.kind, balance, effectiveStatus, overLimit,
+    arrangementStatus, arrangementPayment, contractualPayment, requiredPayment, eligibleForExtra,
+    blockingReasons: [...new Set(blocking)], reasonCodes: [...new Set(reasonCodes)], exclusionReason
+  };
+}
+
+function normaliseDebtStatus(value) {
+  const status = normalise(value);
+  return ['current', 'arrears', 'defaulted', 'over_limit', 'unknown'].includes(status) ? status : 'unknown';
+}
+
+function normaliseArrangementStatus(item) {
+  const status = normalise(item.arrangementStatus);
+  if (['unknown', 'none', 'confirmed'].includes(status)) return status;
+  return item.arrangementConfirmed === true ? 'confirmed' : 'unknown';
+}
+
+function debtStatusSignals(value) {
+  const text = normalise(value);
+  const riskText = text.replace(/\bno arrears\b|\bnot in arrears\b|\bnot defaulted\b|\bnot over[ -]?limit\b/g, ' ');
+  const signals = new Set();
+  if (/default/.test(riskText)) signals.add('defaulted');
+  if (/arrears|late|missed|delinquent|past due|overdue/.test(riskText)) signals.add('arrears');
+  if (/over[ -]?limit|above (?:the )?limit/.test(riskText)) signals.add('over_limit');
+  if (/\bcurrent\b|up to date|satisfactory|paid as agreed|no arrears/.test(text)) signals.add('current');
+  return signals;
+}
+
+function conservativeDebtStatus(signals) {
+  if (signals.has('defaulted')) return 'defaulted';
+  if (signals.has('arrears')) return 'arrears';
+  if (signals.has('over_limit')) return 'over_limit';
+  if (signals.has('current')) return 'current';
+  return 'unknown';
+}
+
+function debtLimit(item) {
+  const value = item.kind === 'overdraft' ? item.limit : item.creditLimit;
+  return knownNonNegative(value) ? Number(value) : Number.NaN;
+}
+
+function revolvingCredit(item) {
+  return /credit|store card|charge card|catalogue|revolving/.test(normalise(item.type));
+}
+
+function knownNonNegative(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function debtRiskRank(safety) {
+  return safety?.overLimit ? 0 : 1;
 }
 
 function isBlankState(state) {

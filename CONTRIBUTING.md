@@ -20,4 +20,6 @@ Use clearly fictional values in tests. Keep financial guidance conservative and 
 4. A small emergency buffer.
 5. Additional debt overpayments.
 
+Unknown or conflicting debt status, required-payment, limit or arrangement information must fail safe. Do not treat a missing field as evidence that an optional payment is appropriate.
+
 Keep the interface ADHD-friendly: one primary action, short labels, visible status and progressive disclosure.
