@@ -3,6 +3,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
+  retryRecovery: () => ipcRenderer.invoke('recovery:retry'),
+  restoreRecoveryBackup: (backupId) => ipcRenderer.invoke('recovery:restore-backup', backupId),
+  requestFreshStart: () => ipcRenderer.invoke('recovery:fresh-start:request'),
+  cancelFreshStart: (token) => ipcRenderer.invoke('recovery:fresh-start:cancel', token),
+  confirmFreshStart: (token) => ipcRenderer.invoke('recovery:fresh-start:confirm', token),
   importFiles: (options) => ipcRenderer.invoke('import:choose', options),
   openDocument: (id) => ipcRenderer.invoke('document:open', id),
   deleteDocument: (id) => ipcRenderer.invoke('document:delete', id),
