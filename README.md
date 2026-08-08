@@ -20,6 +20,7 @@ New installations start completely blank. This repository contains no personal a
 - Excludes confirmed transfers between owned accounts from income and spending.
 - Uses deterministic local financial checks, with an optional small Ollama model for private natural-language guidance.
 - Builds password-protected portable backups.
+- Keeps privacy-safe local diagnostics that can be reviewed, exported or deleted from Settings.
 - Supports installed Windows updates through GitHub Releases.
 
 ## Supported imports
@@ -45,6 +46,7 @@ Unrecognised layouts are rejected visibly. Invalid dates and amounts are never s
 - Original documents are encrypted using AES-256-GCM and opened only through a restricted in-app viewer.
 - Imported files are deduplicated by SHA-256 checksum.
 - No cloud sync, telemetry, analytics or cloud LLM is included.
+- Diagnostic events stay local, exclude financial and document content, use operating-system encryption for detailed entries, expire after 14 days and are never uploaded automatically.
 - The optional guide connects only to Ollama on `127.0.0.1` and receives a compact financial summary, never raw document contents or transaction descriptions.
 - Repository checks reject seeded financial data, common secret formats and financial-document file types.
 
