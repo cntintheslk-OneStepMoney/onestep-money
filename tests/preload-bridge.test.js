@@ -38,6 +38,7 @@ test('sandboxed preload exposes the complete desktop API', async () => {
 
   assert.equal(exposed.name, 'financeAPI');
   assert.ok(Object.isFrozen(exposed.api));
+  await exposed.api.getAppVersion();
   await exposed.api.loadState();
   await exposed.api.saveState({ ok: true });
   await exposed.api.retryRecovery();
@@ -57,6 +58,7 @@ test('sandboxed preload exposes the complete desktop API', async () => {
   await exposed.api.recordRendererFault('RENDERER_UNHANDLED_ERROR');
   await exposed.api.checkForUpdates();
   assert.deepEqual(invocations, [
+    ['app:version'],
     ['state:load'],
     ['state:save', { ok: true }],
     ['recovery:retry'],

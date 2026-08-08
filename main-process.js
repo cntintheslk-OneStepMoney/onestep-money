@@ -126,6 +126,7 @@ function sendUpdateStatus(status) {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('state:load', async () => currentState && store.mode === 'normal'
     ? { ...currentLoadResult, status: 'normal', mode: 'normal', state: currentState, encryption: store.encryptionStatus() }
     : currentLoadResult);
