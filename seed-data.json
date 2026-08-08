@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 4,
+  "meta": {
+    "createdAt": "",
+    "updatedAt": ""
+  },
+  "profile": {
+    "name": "",
+    "locale": "en-GB",
+    "currency": "GBP",
+    "dependableIncome": 0,
+    "paydayDay": 30
+  },
+  "accounts": [],
+  "transactions": [],
+  "payslips": [],
+  "taxDocuments": [],
+  "debts": [],
+  "overdrafts": [],
+  "budgets": [],
+  "scheduledPayments": [],
+  "documents": [],
+  "tasks": [],
+  "checkIns": [],
+  "importBatches": [],
+  "settings": {
+    "selectedMonth": "",
+    "extraDebtPayment": 0,
+    "emergencyBufferTarget": 500,
+    "emergencyBufferBalance": 0,
+    "extraIncomeDebtPercent": 80,
+    "llmModel": "qwen2.5:1.5b",
+    "reminders": {
+      "weekly": false,
+      "weeklyDay": "monday",
+      "hour": 9
+    }
+  }
+}
