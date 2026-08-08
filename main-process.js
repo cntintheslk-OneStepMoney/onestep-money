@@ -106,13 +106,15 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('import:choose', async (_event, options = {}) => {
-    const kind = options.kind === 'payslip' ? 'payslip' : 'statement';
+    const kind = ['payslip', 'credit-report'].includes(options.kind) ? options.kind : 'statement';
     const selection = await dialog.showOpenDialog(mainWindow, {
-      title: kind === 'payslip' ? 'Import payslip' : 'Import bank statement',
+      title: kind === 'payslip' ? 'Import payslip' : kind === 'credit-report' ? 'Import credit report' : 'Import bank statement',
       properties: ['openFile', 'multiSelections'],
       filters: kind === 'payslip'
         ? [{ name: 'Payslips', extensions: ['pdf'] }]
-        : [{ name: 'Statements', extensions: ['pdf', 'csv', 'qif', 'ofx', 'json'] }]
+        : kind === 'credit-report'
+          ? [{ name: 'Credit reports', extensions: ['pdf'] }]
+        : [{ name: 'Statements', extensions: ['pdf', 'csv', 'tsv', 'txt', 'qif', 'ofx', 'qfx', 'json'] }]
     });
     if (selection.canceled) return [];
     await store.createAutomaticBackup('before-import');
@@ -124,10 +126,14 @@ function registerIpcHandlers() {
         const extension = path.extname(filePath).toLowerCase();
         const payload = extension === '.pdf' ? await extractPdfDocument(filePath) : await fs.readFile(filePath, 'utf8');
         const preview = parseImportedDocument(path.basename(filePath), payload, kind, options.accountId || '');
-        preview.records = preview.records.map((record) => ({ ...record, sourceDocumentId: document.id }));
+        preview.records = preview.records.map((record) => ({
+          ...record,
+          sourceDocumentId: document.id,
+          accounts: Array.isArray(record.accounts) ? record.accounts.map((account) => ({ ...account, sourceDocumentId: document.id })) : record.accounts
+        }));
         document.displayName = canonicalDocumentName(document, preview, options.accountId, currentState);
         document.parseStatus = preview.records.length ? (preview.reconciled ? 'ready' : 'review') : 'needs_review';
-        document.linkedRecordIds = preview.records.map((record) => record.id);
+        document.linkedRecordIds = preview.records.flatMap((record) => [record.id, ...(record.accounts || []).map((account) => account.id)]);
         results.push({ document, duplicateDocument: stored.duplicate, preview });
       } catch (error) {
         document.parseStatus = 'needs_review';
@@ -231,11 +237,15 @@ function canonicalDocumentName(document, preview, accountId, state) {
   const record = preview.records?.[0];
   const date = preview.kind === 'payslip'
     ? record?.payDate || `${record?.period || new Date().toISOString().slice(0, 7)}-01`
-    : [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
-  const type = preview.kind === 'payslip' ? 'payslip' : 'bank-statement';
+    : preview.kind === 'credit-report'
+      ? record?.reportDate || new Date().toISOString().slice(0, 10)
+      : [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
+  const type = preview.kind === 'payslip' ? 'payslip' : preview.kind === 'credit-report' ? 'credit-report' : 'bank-statement';
   const provider = preview.kind === 'payslip'
     ? 'jpa'
-    : slugName(state.accounts.find((account) => account.id === accountId)?.institution || 'unassigned');
+    : preview.kind === 'credit-report'
+      ? slugName(record?.provider || 'unknown-provider')
+      : slugName(state.accounts.find((account) => account.id === accountId)?.institution || 'unassigned');
   const base = `${date}__${type}__${provider}`;
   const used = new Set((state.documents || []).map((item) => item.displayName).filter(Boolean));
   let candidate = `${base}${extension}`;
