@@ -124,11 +124,13 @@ test('notification markup and styles preserve accessibility, minimum sizing and 
   assert.match(html, /data-restart-update/);
   assert.match(html, /data-view-update/);
   assert.match(html, /<progress[^>]+max="100"/);
-  assert.match(css, /padding: 0 18px 18px 0/);
+  assert.match(html, /id="notificationLayer"[^>]+popover="manual"/);
+  assert.match(css, /\.notification-layer \{[^}]*position: fixed;[^}]*z-index: 2147483647/);
+  assert.match(css, /\.update-notification-region \{[^}]*width: min\(340px/);
   assert.match(css, /max-width: 340px/);
   assert.match(css, /rgba\(7, 29, 67, 0\.84\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(css, /\.app-shell\.update-notification-visible/);
+  assert.doesNotMatch(css, /\.app-shell\.update-notification-visible/);
   assert.match(main, /update:download/);
   assert.match(main, /update:restart-and-install/);
   assert.match(service, /autoDownload = false/);
