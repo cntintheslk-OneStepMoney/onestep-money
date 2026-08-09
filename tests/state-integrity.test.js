@@ -52,7 +52,7 @@ test('renderer conflict handling replaces stale state and presents the protected
   assert.match(renderer, /showToast\(saved\.message\)/);
 });
 
-test('generated-action snoozes survive save, restart and encrypted backup restore while expired values are cleaned', async (t) => {
+test('legacy generated-action snoozes survive migration and backup without creating fake Next Moves', async (t) => {
   const harness = await createHarness(t);
   const tomorrow = localDateKey(new Date(Date.now() + 86_400_000));
   let state = (await harness.store.loadState()).state;
@@ -67,7 +67,7 @@ test('generated-action snoozes survive save, restart and encrypted backup restor
 
   assert.deepEqual(state.settings.snoozedActions, { 'generated-first-account': tomorrow });
   assert.equal(state.settings.unrecognisedPersistedValue, undefined);
-  assert.equal(buildNextAction(state).id, 'generated-checkin');
+  assert.equal(buildNextAction(state).id, 'next-move-caught-up');
 
   const restarted = new FinanceDataStore(harness.directory, seedPath, null, { secureStorage: secureStorage() });
   await restarted.initialise();
@@ -87,7 +87,7 @@ test('generated-action snoozes survive save, restart and encrypted backup restor
   expired.settings.snoozedActions = { 'generated-first-account': '2000-01-01' };
   const cleaned = await restarted.saveState(expired);
   assert.deepEqual(cleaned.settings.snoozedActions, {});
-  assert.equal(buildNextAction(cleaned).id, 'generated-first-account');
+  assert.equal(buildNextAction(cleaned).id, 'next-move-caught-up');
 });
 
 test('the all-time reporting selection survives saves and restarts', async (t) => {

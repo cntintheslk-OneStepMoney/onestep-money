@@ -10,12 +10,14 @@ New installations start completely blank. This repository contains no personal a
 
 ## What it does
 
-- Gives one small immediate action instead of a crowded to-do list.
+- Shows one explainable **Next Move** chosen from the persistent Review Inbox by financial consequence, due dates and genuine blockers rather than age alone.
+- Keeps the complete unresolved queue in Review Inbox while Today reveals only a small amount of worthwhile work and can still say **You’re caught up for now** when only low-priority housekeeping remains.
+- Consolidates genuinely related review work into a manageable Five-Minute Money Check-In without merging or deleting the underlying lifecycle items.
 - Imports bank statements with a review step before saving records.
 - Synchronises reconciled statement balances and keeps linked overdraft usage up to date automatically.
 - Imports PDF credit reports through a dated reconciliation preview that separates matches, updates, new borrowing, conflicts and accounts needing review.
 - Preserves newer balances and known defaults, arrears or arrangements when a report is older, incomplete or ambiguous, while keeping current-account borrowing as overdrafts.
-- Separates debts from overdrafts while applying one shared safety assessment to payoff forecasts, generated actions and local guidance.
+- Separates debts from overdrafts while applying one shared safety assessment to payoff forecasts, priority decisions and local guidance.
 - Protects required payments and confirmed arrangements before considering an optional debt payment.
 - Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips or manually entered pay records.
 - Stores imported originals in an encrypted local document vault.
@@ -60,6 +62,14 @@ Unrecognised layouts are rejected visibly. Invalid dates and amounts are never s
 - Accounts above a known credit or overdraft limit receive priority over ordinary eligible debts, while essential commitments and cash availability remain protected.
 - Conflicting tracked and imported statuses use the more cautious state and create an information-checking action.
 - The optional-payment amount is capped by dependable income after budgets, unbudgeted required debt payments, scheduled commitments and the selected starter buffer. A known current-account balance can reduce that cap further so OneStep does not recommend borrowing the payment back.
+
+## Review and priority model
+
+- Review work uses one persisted lifecycle: **Needs Attention → In Progress → Snoozed → Resolved**.
+- Next Move derives Critical, Important, Normal or Low priority locally from the authoritative financial and review state. Internal ranking values are not shown or persisted.
+- Financial Safety remains authoritative over affordability, protected commitments and optional debt payments; priority decides only which known issue is most useful to review first.
+- Snoozed work stays out of Today until it returns. Repeated deferral is described factually and never changes the underlying financial state.
+- Related categorisation work may share a short workflow, but every payment keeps its own resolution state. Unrelated tasks are never grouped simply because they are open.
 
 ## Privacy model
 
