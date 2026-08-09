@@ -10,3 +10,14 @@ test('package metadata derives the release version from package.json', () => {
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[''].version, packageJson.version);
 });
+
+test('runtime display and Windows artifact naming derive from package metadata', () => {
+  const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const mainProcess = fs.readFileSync(new URL('../main-process.js', import.meta.url), 'utf8');
+  const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+
+  assert.equal(packageJson.build.win.artifactName, 'onestep-money-${version}-windows-${arch}.${ext}');
+  assert.match(mainProcess, /ipcMain\.handle\('app:version', \(\) => app\.getVersion\(\)\)/);
+  assert.match(renderer, /window\.financeAPI\.getAppVersion\(\)/);
+  assert.doesNotMatch(renderer, new RegExp(`v${packageJson.version.replaceAll('.', '\\.')}`));
+});

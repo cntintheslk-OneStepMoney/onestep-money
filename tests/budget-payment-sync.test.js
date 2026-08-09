@@ -346,11 +346,12 @@ test('budget rows expose clear accessible edit and remove controls', () => {
 test('payment editing and filtering expose Income as a standard category', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+  const ledger = fs.readFileSync(new URL('../transaction-ledger.js', import.meta.url), 'utf8');
 
   assert.match(html, /<label>Payment category<select id="transactionCategoryFilter">/);
   assert.match(renderer, /\['','Uncategorised'\], \[INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY\]/);
   assert.match(renderer, /item\.category = INCOME_PAYMENT_CATEGORY/);
-  assert.match(renderer, /category === INCOME_PAYMENT_CATEGORY_VALUE \? isIncomePayment\(item\)/);
+  assert.match(ledger, /category === INCOME_PAYMENT_CATEGORY_VALUE && !isIncomePayment\(item\)/);
   assert.match(renderer, /isIncomePayment\(item\) \? INCOME_PAYMENT_CATEGORY/);
 });
 
