@@ -15,7 +15,7 @@ test('a genuine first launch creates one valid initial state and starts normally
   const first = await harness.store.loadState();
   assert.equal(first.status, 'normal');
   assert.equal(first.source, 'first_install');
-  assert.equal(first.state.schemaVersion, 7);
+  assert.equal(first.state.schemaVersion, 8);
 
   const firstBytes = await fs.readFile(harness.store.statePath);
   const second = await harness.store.loadState();
@@ -51,7 +51,7 @@ test('legacy debt safety fields migrate conservatively and persist across restar
 
   const loaded = await harness.store.loadState();
 
-  assert.equal(loaded.state.schemaVersion, 7);
+  assert.equal(loaded.state.schemaVersion, 8);
   assert.equal(loaded.state.debts[0].arrangementStatus, 'unknown');
   assert.equal(loaded.state.debts[0].arrangementPayment, null);
   assert.equal(loaded.state.debts[0].statusConflict, false);
@@ -184,7 +184,7 @@ test('restoring a validated backup exits recovery only after the restored state 
   assert.equal(restored.status, 'normal');
   assert.equal(restored.source, 'restored_backup');
   assert.equal(restored.state.profile.name, 'Restored User');
-  assert.equal(restored.state.schemaVersion, 7);
+  assert.equal(restored.state.schemaVersion, 8);
   assert.deepEqual(await fs.readFile(backupPath), backup);
   const recoveryCopies = await fs.readdir(harness.store.recoveryPath);
   assert.ok(recoveryCopies.length >= 2);
@@ -263,7 +263,7 @@ test('fresh start requires a live confirmation and cancellation changes nothing'
   const confirmed = await harness.store.confirmFreshStart(confirmedRequest.token);
   assert.equal(confirmed.status, 'normal');
   assert.equal(confirmed.source, 'fresh_start');
-  assert.equal(confirmed.state.schemaVersion, 7);
+  assert.equal(confirmed.state.schemaVersion, 8);
   assert.equal(confirmed.state.accounts.length, 0);
   assert.notDeepEqual(await fs.readFile(harness.store.statePath), original);
   const recoveryCopies = await fs.readdir(harness.store.recoveryPath);

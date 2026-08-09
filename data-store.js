@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { localFinancialMonthKey } from './date-utils.js';
+import { knownPaydayDay, synchroniseReviewItems } from './review-lifecycle.js';
 
 const STATE_FILE = 'finance-state.json';
 const KEY_FILE = 'vault-key.json';
@@ -11,7 +12,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 const PORTABLE_BACKUP_FORMAT_VERSION = 2;
 const LOCAL_BACKUP_FORMAT_VERSION = 1;
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 const FRESH_START_CONFIRMATION_MS = 5 * 60 * 1000;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
@@ -19,7 +20,7 @@ const MAX_BACKUP_ENTRIES = 5000;
 const JOURNAL_FILE = 'active-restore.json';
 const STATE_COLLECTIONS = Object.freeze([
   'accounts', 'transactions', 'payslips', 'taxDocuments', 'creditReports', 'debts', 'overdrafts',
-  'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches'
+  'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches', 'reviewItems'
 ]);
 
 export const RECOVERY_MODES = Object.freeze({
@@ -1846,14 +1847,14 @@ function isCanonicalBase64AllowEmpty(value) {
 
 function migrateState(input) {
   const state = input && typeof input === 'object' ? input : {};
-  return {
+  const migrated = {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     meta: {
       createdAt: state.meta?.createdAt || new Date().toISOString(),
       updatedAt: state.meta?.updatedAt || new Date().toISOString(),
       revision: nonNegativeInteger(state.meta?.revision, 0)
     },
-    profile: state.profile || { name: '', locale: 'en-GB', currency: 'GBP', dependableIncome: 0, paydayDay: 30 },
+    profile: migrateProfile(state.profile, state.schemaVersion),
     accounts: Array.isArray(state.accounts) ? state.accounts : [],
     transactions: Array.isArray(state.transactions) ? state.transactions.map(migrateTransactionReviewState) : [],
     payslips: Array.isArray(state.payslips) ? state.payslips : [],
@@ -1867,7 +1868,22 @@ function migrateState(input) {
     tasks: Array.isArray(state.tasks) ? state.tasks : [],
     checkIns: Array.isArray(state.checkIns) ? state.checkIns : [],
     importBatches: Array.isArray(state.importBatches) ? state.importBatches : [],
+    reviewItems: Array.isArray(state.reviewItems) ? state.reviewItems : [],
     settings: migrateSettings(state.settings)
+  };
+  return synchroniseReviewItems(migrated);
+}
+
+function migrateProfile(value, sourceSchemaVersion) {
+  const profile = isPlainObject(value) ? value : {};
+  return {
+    ...profile,
+    name: String(profile.name || ''),
+    locale: String(profile.locale || 'en-GB'),
+    currency: String(profile.currency || 'GBP'),
+    dependableIncome: finiteNumber(profile.dependableIncome, 0),
+    // Older builds supplied day 30 as an invisible default, so it was not confirmed by the user.
+    paydayDay: Number(sourceSchemaVersion) >= 8 ? knownPaydayDay(profile.paydayDay) : null
   };
 }
 
@@ -1913,16 +1929,19 @@ function migrateSnoozedActions(value) {
 function migrateTransactionReviewState(item) {
   if (!isPlainObject(item)) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   const duplicateStatus = ['none', 'possible', 'exact'].includes(item.duplicateStatus) ? item.duplicateStatus : 'none';
+  const importReviewStatus = ['trusted', 'pending', 'accepted', 'rejected'].includes(item.importReviewStatus) ? item.importReviewStatus : 'trusted';
+  const importActive = !['pending', 'rejected'].includes(importReviewStatus);
   if (duplicateStatus === 'possible') {
     const reviewStatus = ['pending', 'accepted', 'rejected'].includes(item.reviewStatus) ? item.reviewStatus : 'pending';
-    return { ...item, duplicateStatus, reviewStatus, financiallyActive: reviewStatus === 'accepted' };
+    return { ...item, duplicateStatus, reviewStatus, importReviewStatus, financiallyActive: reviewStatus === 'accepted' && importActive };
   }
-  if (duplicateStatus === 'exact') return { ...item, duplicateStatus, reviewStatus: 'rejected', financiallyActive: false };
+  if (duplicateStatus === 'exact') return { ...item, duplicateStatus, reviewStatus: 'rejected', importReviewStatus, financiallyActive: false };
   return {
     ...item,
     duplicateStatus,
+    importReviewStatus,
     reviewStatus: item.reviewStatus === 'rejected' ? 'rejected' : 'not_required',
-    financiallyActive: item.reviewStatus === 'rejected' ? false : item.financiallyActive !== false
+    financiallyActive: item.reviewStatus === 'rejected' || !importActive ? false : item.financiallyActive !== false
   };
 }
 
@@ -2051,6 +2070,9 @@ function validateMigratedState(state) {
   if (!Number.isInteger(state.meta.revision) || state.meta.revision < 0 || !isPlainObject(state.settings.snoozedActions)) {
     throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
+  if (state.profile.paydayDay !== null && knownPaydayDay(state.profile.paydayDay) === null) {
+    throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+  }
   for (const value of [
     state.profile.dependableIncome,
     state.settings.extraDebtPayment,
@@ -2074,9 +2096,27 @@ function validateMigratedState(state) {
     if (!isPlainObject(transaction)
       || !['none', 'possible', 'exact'].includes(transaction.duplicateStatus)
       || !['not_required', 'pending', 'accepted', 'rejected'].includes(transaction.reviewStatus)
+      || !['trusted', 'pending', 'accepted', 'rejected'].includes(transaction.importReviewStatus)
       || typeof transaction.financiallyActive !== 'boolean'
-      || (transaction.duplicateStatus === 'possible' && transaction.financiallyActive !== (transaction.reviewStatus === 'accepted'))
+      || (transaction.duplicateStatus === 'possible' && transaction.financiallyActive !== (transaction.reviewStatus === 'accepted' && !['pending', 'rejected'].includes(transaction.importReviewStatus)))
       || (transaction.duplicateStatus === 'exact' && transaction.financiallyActive !== false)) {
+      throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
+    }
+  }
+  for (const item of state.reviewItems) {
+    if (!isPlainObject(item)
+      || typeof item.id !== 'string'
+      || !['needs_attention', 'in_progress', 'snoozed', 'resolved'].includes(item.status)
+      || !['high', 'normal', 'low'].includes(item.priority)
+      || typeof item.type !== 'string'
+      || typeof item.sourceType !== 'string'
+      || typeof item.sourceId !== 'string'
+      || !validIsoDate(item.createdAt)
+      || !validIsoDate(item.updatedAt)
+      || (item.snoozedUntil !== null && !validIsoDate(item.snoozedUntil))
+      || (item.status === 'snoozed') !== (item.snoozedUntil !== null)
+      || (item.status === 'resolved') !== Boolean(item.resolution)
+      || (item.resolution && (!isPlainObject(item.resolution) || typeof item.resolution.decision !== 'string' || !validIsoDate(item.resolution.resolvedAt)))) {
       throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
     }
   }

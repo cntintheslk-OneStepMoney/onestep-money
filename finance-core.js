@@ -1,6 +1,7 @@
 import { localFinancialMonthKey } from './date-utils.js';
+import { activeReviewItems, reviewItemPresentation, synchroniseReviewItems } from './review-lifecycle.js';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 export const ALL_TIME_PERIOD = 'all';
 export const INCOME_PAYMENT_CATEGORY = 'Income';
 
@@ -236,10 +237,20 @@ function budgetUsageRatio(row) {
 export function buildNextAction(state, now = new Date()) {
   const today = localDateKey(now);
   const isSnoozed = (id) => String(state.settings?.snoozedActions?.[id] || '') > today;
-  const task = (state.tasks || [])
-    .filter((entry) => !entry.completedAt && (!entry.snoozedUntil || entry.snoozedUntil <= today))
-    .sort((left, right) => Number(left.order || 999) - Number(right.order || 999))[0];
-  if (task) return task;
+  synchroniseReviewItems(state, now);
+  const reviewItem = activeReviewItems(state, now)[0];
+  if (reviewItem) {
+    const presentation = reviewItemPresentation(reviewItem, state);
+    return {
+      id: `generated-review-${reviewItem.id}`,
+      reviewId: reviewItem.id,
+      completeDirect: reviewItem.type === 'generated_action',
+      title: presentation.title,
+      detail: presentation.detail,
+      timeframe: reviewItem.type === 'uncategorised_payment' ? '2 min' : '10 min',
+      stage: reviewItem.priority === 'high' ? 'today' : 'this week'
+    };
+  }
 
   const checkIn = { id: 'generated-checkin', title: 'Complete a five-minute check-in', detail: 'Update one balance, then stop. Consistency matters more than perfection.', timeframe: '5 min', stage: 'today' };
   if (!(state.accounts || []).length) {
@@ -343,6 +354,7 @@ export function findSavingsOpportunities(state) {
 
 export function isTransactionFinanciallyActive(transaction = {}) {
   if (transaction.deletedAt || transaction.ignored === true || transaction.valid === false) return false;
+  if (['pending', 'rejected'].includes(transaction.importReviewStatus)) return false;
   if (transaction.duplicateStatus === 'exact') return false;
   if (transaction.reviewStatus === 'rejected') return false;
   if (transaction.duplicateStatus === 'possible' && transaction.reviewStatus !== 'accepted') return false;
@@ -355,9 +367,10 @@ export function resolvePossibleDuplicate(state, transactionId, decision) {
   const transaction = (next.transactions || []).find((item) => item.id === transactionId);
   if (!transaction || transaction.duplicateStatus !== 'possible') throw new Error('This possible duplicate is no longer available for review.');
   transaction.reviewStatus = decision;
-  transaction.financiallyActive = decision === 'accepted';
+  transaction.financiallyActive = decision === 'accepted' && !['pending', 'rejected'].includes(transaction.importReviewStatus);
   transaction.reviewedAt = new Date().toISOString();
-  return next;
+  transaction.duplicateDecision = decision === 'accepted' ? 'both_genuine' : 'duplicate';
+  return synchroniseReviewItems(next);
 }
 
 export function debtPlan(state, strategy = 'hybrid', extraPayment = state.settings?.extraDebtPayment ?? 0, startMonth = currentMonth()) {
@@ -696,7 +709,8 @@ function priorityOrder(items, balances, strategy) {
 function assessDebtAccount(item) {
   const balance = Math.max(0, Number(item.currentBalance || 0));
   const storedStatus = normaliseDebtStatus(item.status);
-  const reportedStatus = creditReportDebtStatus(item.reportedStatus);
+  const reportedStatusReviewed = Boolean(item.statusReviewedAt) && String(item.reviewedReportedStatus || '') === String(item.reportedStatus || '');
+  const reportedStatus = reportedStatusReviewed ? 'unknown' : creditReportDebtStatus(item.reportedStatus);
   const statusSignals = new Set([storedStatus]);
   if (reportedStatus !== 'unknown') statusSignals.add(reportedStatus);
   if (item.defaultDate) statusSignals.add('defaulted');
@@ -711,7 +725,7 @@ function assessDebtAccount(item) {
   const requiredPayment = arrangementStatus === 'confirmed' ? arrangementPayment : contractualPayment;
   const reportedConflict = storedStatus !== 'unknown' && reportedStatus !== 'unknown' && storedStatus !== reportedStatus;
   const defaultDateConflict = Boolean(item.defaultDate) && !['defaulted', 'unknown'].includes(storedStatus);
-  const conflictingStatus = Boolean(item.statusConflict) || creditReportStatusConflict(item.reportedStatus) || reportedConflict || defaultDateConflict;
+  const conflictingStatus = Boolean(item.statusConflict) || (!reportedStatusReviewed && creditReportStatusConflict(item.reportedStatus)) || reportedConflict || defaultDateConflict;
   const blocking = [];
   const reasonCodes = [];
   const addBlock = (code, message) => { reasonCodes.push(code); blocking.push(message); };

@@ -1,4 +1,5 @@
 import { createId } from './finance-core.js';
+import { synchroniseReviewItems } from './review-lifecycle.js';
 
 const SUPPORTED_TYPES = new Set([
   'credit-card', 'personal-loan', 'car-finance', 'hire-purchase', 'store-card',
@@ -112,7 +113,7 @@ export function applyCreditReportImportPlan(state, preview, reviewedPlan, docume
     conflictCount: currentPlan.counts.conflict,
     ignoredCount: currentPlan.counts.ignore
   });
-  return { state: next, result };
+  return { state: synchroniseReviewItems(next, new Date(importedAt)), result };
 }
 
 export function normaliseCreditAccountType(value) {
