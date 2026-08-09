@@ -17,7 +17,7 @@ New installations start completely blank. This repository contains no personal a
 - Preserves newer balances and known defaults, arrears or arrangements when a report is older, incomplete or ambiguous, while keeping current-account borrowing as overdrafts.
 - Separates debts from overdrafts while applying one shared safety assessment to payoff forecasts, generated actions and local guidance.
 - Protects required payments and confirmed arrangements before considering an optional debt payment.
-- Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips.
+- Tracks gross pay, PAYE, National Insurance, other deductions and net pay from supported payslips or manually entered pay records.
 - Stores imported originals in an encrypted local document vault.
 - Adds notes and clearer descriptions to accounts, payments, debts and overdrafts.
 - Detects exact and possible duplicate transactions conservatively.
@@ -41,6 +41,8 @@ Bank statements:
 Payslips:
 
 - JPA E017 PDF payslips
+- MyNavy Statement of Salary and Deductions PDFs, including itemised payments, deductions, current-period balances and year-to-date totals
+- Manual pay entry and full pay-record editing, with deduction totals calculated from itemised lines and reconciliation required before saving
 
 Credit reports:
 

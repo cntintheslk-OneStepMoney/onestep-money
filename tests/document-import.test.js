@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCreditReportText, parseCsvStatement, parseImportedDocument, parseOfxStatement, parsePayslipText, parsePdfStatement, parseQifStatement } from '../document-import.js';
+import { parseCreditReportText, parseCsvStatement, parseImportedDocument, parseOfxStatement, parsePayslipDocument, parsePayslipText, parsePdfStatement, parseQifStatement } from '../document-import.js';
 
 test('CSV with separate debit and credit columns keeps a positive BACS credit as income', () => {
   const result = parseCsvStatement('Date,Description,Debit,Credit,Balance\n31/01/2025,BACS PAYROLL,,2500.00,100.00', 'pay.csv', 'acct-1');
@@ -250,3 +250,103 @@ test('JPA payslip parser reconciles gross, detailed deductions and net pay', () 
   assert.equal(result.records[0].earnings.length, 1);
   assert.equal(result.records[0].deductions.length, 2);
 });
+
+test('MyNavy layout parser separates side-by-side payments and deductions and extracts balances', () => {
+  const text = `Statement of Salary and Deductions
+Pay Processing Information
+Period Type Tax Period Number Pay Date
+Calendar Month 8 31-Aug-2026
+Tax Details
+Tax Code Tax Basis NI Category Employers PAYE Reference Number
+1100L Cumulative A 123/AB456
+Summary of Payments
+Total Gross Pay Total Deductions Total Amount Paid
+3200.00 600.00 2600.00
+Payments                        Deductions
+Description          Amount    Description                 Amount
+Basic Pay           3000.00    Example deduction A          20.00
+Allowance            200.00    Example deduction B         100.00
+                                Example deduction C          10.00
+                                Example deduction D         400.00
+                                Example deduction E          20.00
+                                Example deduction F          50.00
+Net Pay / Distribution
+Balances Current Period Balances Current Tax Year
+Gross Pay PTD 3200.00 Gross Pay YTD 25600.00
+NIable Pay PTD 3200.00 NIable Pay YTD 25600.00
+Taxable Pay PTD 3150.00 PAYE YTD 3200.00
+NI Employee YTD 1500.00
+NI Employer YTD 4200.00
+Taxable Pay YTD 25200.00
+Messages to Employee
+Basic Pay: Annual Salary 38,400.00`;
+  const document = {
+    text,
+    pages: [{ lines: [
+      layoutLine(620, [['Period Type', 44], ['Tax Period Number', 216], ['Pay Date', 388]]),
+      layoutLine(610, [['Calendar Month', 44], ['8', 216], ['31-Aug-2026', 388]]),
+      layoutLine(578, [['Tax Code', 44], ['Tax Basis', 261], ['NI Category', 382], ['Employers PAYE Reference Number', 431]]),
+      layoutLine(568, [['1100L', 44], ['Cumulative', 258], ['A', 417], ['123/AB456', 506]]),
+      layoutLine(503, [['Payments', 44], ['Deductions', 306]]),
+      layoutLine(492, [['Description', 44], ['Amount', 261], ['Description', 306], ['Amount', 523]]),
+      layoutLine(481, [['Basic Pay', 44], ['3000.00', 262], ['Example deduction A', 306], ['20.00', 532]]),
+      layoutLine(470, [['Allowance', 44], ['200.00', 262], ['Example deduction B', 306], ['100.00', 528]]),
+      layoutLine(459, [['Example deduction C', 306], ['10.00', 532]]),
+      layoutLine(448, [['Example deduction D', 306], ['400.00', 528]]),
+      layoutLine(437, [['Example deduction E', 306], ['20.00', 532]]),
+      layoutLine(426, [['Example deduction F', 306], ['50.00', 532]]),
+      layoutLine(406, [['Net Pay / Distribution', 44]])
+    ] }]
+  };
+
+  const result = parsePayslipDocument(document, 'fictional-mynavy.pdf');
+  const record = result.records[0];
+  assert.equal(result.reconciled, true);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(record.provider, 'mynavy');
+  assert.equal(record.payDate, '2026-08-31');
+  assert.equal(record.grossPay, 3200);
+  assert.equal(record.totalDeductions, 600);
+  assert.equal(record.netPay, 2600);
+  assert.equal(record.earnings.length, 2);
+  assert.equal(record.deductions.length, 6);
+  assert.equal(record.taxablePay, 3150);
+  assert.equal(record.niablePay, 3200);
+  assert.equal(record.grossPayYtd, 25600);
+  assert.equal(record.taxablePayYtd, 25200);
+  assert.equal(record.niablePayYtd, 25600);
+  assert.equal(record.payeYtd, 3200);
+  assert.equal(record.niEmployeeYtd, 1500);
+  assert.equal(record.niEmployerYtd, 4200);
+  assert.equal(record.annualSalary, 38400);
+  assert.equal(record.taxCode, '1100L');
+  assert.equal(record.taxBasis, 'Cumulative');
+  assert.equal(record.niCategory, 'A');
+});
+
+test('MyNavy text-only fallback still reconciles when layout coordinates are unavailable', () => {
+  const text = `Statement of Salary and Deductions
+Period Type  Tax Period Number  Pay Date
+Calendar Month  8  31-Aug-2026
+Summary of Payments
+Total Gross Pay  Total Deductions  Total Amount Paid
+3200.00  600.00  2600.00
+Payments                        Deductions
+Description          Amount    Description                 Amount
+Basic Pay          3000.00     Example deduction A          100.00
+Allowance           200.00     Example deduction B          200.00
+                               Example deduction C          300.00
+Net Pay / Distribution
+Balances Current Period
+Gross Pay PTD 3200.00
+NIable Pay PTD 3200.00
+Taxable Pay PTD 3150.00`;
+  const result = parsePayslipText(text, 'fictional-text-only.pdf');
+  assert.equal(result.reconciled, true);
+  assert.equal(result.records[0].earnings.length, 2);
+  assert.equal(result.records[0].deductions.length, 3);
+});
+
+function layoutLine(y, values) {
+  return { y, items: values.map(([text, x]) => ({ text, x, width: Math.max(10, text.length * 4), height: 8 })), text: values.map(([text]) => text).join(' ') };
+}
