@@ -35,20 +35,21 @@ test('reporting months retain a usable selected-month fallback when there is no 
   assert.deepEqual(availableReportingMonths(state), ['2025-08']);
 });
 
-test('a blank installation gives one onboarding action without example finance data', () => {
+test('a blank installation does not manufacture a Next Move from onboarding state', () => {
   const state = { ...baseState(), accounts: [] };
-  assert.equal(buildNextAction(state).id, 'generated-first-account');
+  assert.equal(buildNextAction(state).id, 'next-move-caught-up');
+  assert.equal(buildNextAction(state).passive, true);
   assert.equal(buildFinancialChecks(state).length, 2);
 });
 
-test('an account with no payments advances onboarding to one statement import', () => {
+test('an account with no review work does not create a fake statement-import task', () => {
   const state = { ...baseState(), accounts: [{ id: 'account-1', name: 'Main account' }] };
-  assert.equal(buildNextAction(state).id, 'generated-first-import');
+  assert.equal(buildNextAction(state).id, 'next-move-caught-up');
 });
 
-test('a generated action snoozed until tomorrow is replaced with a five-minute check-in', () => {
+test('legacy generated-action snooze settings do not create a replacement task', () => {
   const state = { ...baseState(), accounts: [], settings: { ...baseState().settings, snoozedActions: { 'generated-first-account': '2025-01-11' } } };
-  assert.equal(buildNextAction(state, new Date(2025, 0, 10, 12)).id, 'generated-checkin');
+  assert.equal(buildNextAction(state, new Date(2025, 0, 10, 12)).id, 'next-move-caught-up');
 });
 
 test('today completion recognises both action and five-minute check-ins but not another day', () => {

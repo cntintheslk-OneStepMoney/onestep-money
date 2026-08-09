@@ -82,3 +82,28 @@ test('Review Inbox uses accessible controls, restrained counts and progressive d
   assert.match(css, /\.review-priority/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
+
+test('Today exposes one explainable Next Move, supporting work and a genuine caught-up state', async () => {
+  const [html, renderer, css] = await Promise.all([
+    fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../styles.css', import.meta.url), 'utf8')
+  ]);
+
+  assert.equal((html.match(/id="nextActionTitle"/g) || []).length, 1);
+  assert.match(html, /<p class="eyebrow">NEXT MOVE<\/p>/);
+  assert.match(html, /id="completeActionButton"[^>]*type="button">Do it<\/button>/);
+  assert.match(html, /id="snoozeActionButton"[^>]*type="button">Snooze<\/button>/);
+  assert.match(html, /id="nextMoveWhy"[\s\S]*<summary>Why\?<\/summary>/);
+  assert.match(html, /id="todayProgressStatus"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="todaySupportingSection"[\s\S]*Everything else remains in Review Inbox/);
+  assert.match(html, /id="dailyCompleteTitle">You’re caught up for now/);
+  assert.match(renderer, /prioritySnapshot\(state, new Date\(\), \{ preferredItemId: pendingAction\?\.reviewId, safetyAssessment: prioritySafety \}\)/);
+  assert.match(renderer, /priorityView\.lowPriorityRemaining/);
+  assert.match(renderer, /recordPriorityDiagnostic\(PRIORITY_DIAGNOSTIC_CODES\.EVALUATION_FAILED\)/);
+  assert.match(renderer, /recordPriorityDiagnostic\(PRIORITY_DIAGNOSTIC_CODES\.CONSOLIDATION_INVALID\)/);
+  assert.doesNotMatch(renderer, /Priority score|dueDateModifier|financialRisk \+/i);
+  assert.match(css, /\.next-move-band\.band-critical/);
+  assert.match(css, /\.today-supporting-list/);
+  assert.match(css, /summary:focus-visible/);
+});

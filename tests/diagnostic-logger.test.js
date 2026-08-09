@@ -54,6 +54,22 @@ test('diagnostics retain supported credit-report and statement classifications w
   assert.doesNotMatch(report.text, /1234\.56|12345678|private-|credit reference/);
 });
 
+test('priority diagnostics retain only privacy-safe technical references', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory);
+
+  await logger.record('PRIORITY_EVALUATION_FAILED', { amount: 999, description: 'Private payment detail' });
+  await logger.record('NEXT_MOVE_UNAVAILABLE', { account: 'Private account' });
+  await logger.record('ACTION_CONSOLIDATION_INVALID', { merchant: 'Private merchant' });
+  const report = await logger.buildReport();
+
+  assert.match(report.text, /UI-105 PRIORITY_EVALUATION_FAILED/);
+  assert.match(report.text, /UI-106 NEXT_MOVE_UNAVAILABLE/);
+  assert.match(report.text, /UI-107 ACTION_CONSOLIDATION_INVALID/);
+  assert.doesNotMatch(report.text, /999|Private payment|Private account|Private merchant/);
+});
+
 test('parser compatibility diagnostics retain only approved classifications', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
