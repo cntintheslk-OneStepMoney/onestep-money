@@ -41,6 +41,7 @@ const byId = (id) => document.getElementById(id);
 window.addEventListener('error', () => window.financeAPI?.recordRendererFault('RENDERER_UNHANDLED_ERROR').catch(() => {}));
 window.addEventListener('unhandledrejection', () => window.financeAPI?.recordRendererFault('RENDERER_UNHANDLED_REJECTION').catch(() => {}));
 
+initialiseNotificationLayer();
 initialise();
 
 async function initialise() {
@@ -281,9 +282,9 @@ function bindEvents() {
   byId('completeActionButton').addEventListener('click', completeNextAction);
   byId('snoozeActionButton').addEventListener('click', snoozeNextAction);
   byId('quickCheckInButton').addEventListener('click', logCheckIn);
-  byId('importStatementButton').addEventListener('click', () => importDocuments('statement'));
-  byId('importPayslipButton').addEventListener('click', () => importDocuments('payslip'));
-  byId('importCreditReportButton').addEventListener('click', () => importDocuments('credit-report'));
+  bindSingleClickAction('importStatementButton', 'Opening…', () => importDocuments('statement'));
+  bindSingleClickAction('importPayslipButton', 'Opening…', () => importDocuments('payslip'));
+  bindSingleClickAction('importCreditReportButton', 'Opening…', () => importDocuments('credit-report'));
   byId('exportCsvButton').addEventListener('click', async () => {
     const saved = await window.financeAPI.exportCsv(exportTransactionsCsv(state.transactions));
     if (saved) showToast('Payments exported safely.');
@@ -302,8 +303,8 @@ function bindEvents() {
   byId('payslipList').addEventListener('click', handleEditClick);
   byId('documentCards').addEventListener('click', handleDocumentClick);
   byId('accountCards').addEventListener('click', handleEditClick);
-  byId('saveEditButton').addEventListener('click', saveEditor);
-  byId('confirmImportButton').addEventListener('click', confirmCurrentImport);
+  bindSingleClickAction('saveEditButton', 'Saving…', saveEditor);
+  bindSingleClickAction('confirmImportButton', 'Importing…', confirmCurrentImport, syncConfirmImportButton);
   byId('importDialog').addEventListener('close', handleImportDialogClosed);
   byId('importResultDialog').addEventListener('close', () => { currentImport = null; showNextImport(); });
   byId('guideForm').addEventListener('submit', askGuide);
@@ -752,9 +753,22 @@ function showNextImport() {
   const messages = [...(currentImport.statementPlan?.warnings || currentImport.creditPlan?.warnings || preview.warnings), ...preview.rejected.map((item) => `Row ${item.row || '—'}: ${item.reason}`)];
   warning.hidden = !messages.length; warning.textContent = messages.join('\n');
   renderImportPreview(preview);
-  byId('confirmImportButton').disabled = preview.kind === 'statement' ? !currentImport.statementPlan.canApply : preview.kind === 'credit-report' ? !currentImport.creditPlan.canApply : !preview.records.length;
-  byId('confirmImportButton').textContent = preview.kind === 'credit-report' ? 'Apply reviewed credit report' : 'Import reviewed records';
+  syncConfirmImportButton();
   byId('importDialog').showModal();
+}
+
+function syncConfirmImportButton() {
+  const button = byId('confirmImportButton');
+  if (!currentImport?.preview) {
+    button.disabled = false;
+    button.textContent = 'Import reviewed records';
+    return;
+  }
+  const preview = currentImport.preview;
+  button.disabled = preview.kind === 'statement'
+    ? !currentImport.statementPlan.canApply
+    : preview.kind === 'credit-report' ? !currentImport.creditPlan.canApply : !preview.records.length;
+  button.textContent = preview.kind === 'credit-report' ? 'Apply reviewed credit report' : 'Import reviewed records';
 }
 
 function renderImportPreview(preview) {
@@ -1442,7 +1456,7 @@ function renderUpdateUi() {
   byId('updateNotificationTitle').textContent = view.notificationTitle;
   byId('updateNotificationMessage').textContent = view.notificationMessage;
   byId('updateNotificationRegion').hidden = !view.notificationVisible;
-  byId('appShell').classList.toggle('update-notification-visible', view.notificationVisible);
+  syncNotificationLayer();
 }
 
 async function reviewDiagnostics() {
@@ -1618,6 +1632,28 @@ function cell(text = '', className = '') { const output = element('td', classNam
 function element(tag, className = '', text = '') { const output = document.createElement(tag); if (className) output.className = className; if (text !== '') output.textContent = text; return output; }
 function append(parent, ...children) { parent.append(...children); return parent; }
 function clear(node) { while (node.firstChild) node.firstChild.remove(); }
+function bindSingleClickAction(id, busyLabel, action, afterAction) {
+  byId(id).addEventListener('click', (event) => runSingleClickAction(event, busyLabel, action, afterAction));
+}
+async function runSingleClickAction(event, busyLabel, action, afterAction) {
+  event.preventDefault();
+  const button = event.currentTarget;
+  if (button.disabled || button.getAttribute('aria-busy') === 'true') return;
+  const previousLabel = button.textContent;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.textContent = busyLabel;
+  try {
+    await action(event);
+  } catch (error) {
+    showToast(error?.message || 'That action could not be completed. Nothing was saved.');
+  } finally {
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    if (button.textContent === busyLabel) button.textContent = previousLabel;
+    afterAction?.();
+  }
+}
 function monthLabel(month) { if (!/^\d{4}-\d{2}$/.test(month || '')) return month || 'Unknown'; return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`)); }
 function localDateKey(value) { const date = value instanceof Date ? value : new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function titleCase(value) { return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()); }
@@ -1626,4 +1662,37 @@ function arrangementLabel(item) { return item.arrangementStatus === 'confirmed' 
 function requiredPaymentLabel(item) { const value = item.arrangementStatus === 'confirmed' ? item.arrangementPayment : item.contractualPayment; return value == null ? 'Unknown' : formatCurrency(value); }
 function paymentStatusLabel(item) { return `${requiredPaymentLabel(item)} · ${arrangementLabel(item)}`; }
 function limitAprLabel(item) { return `${item.limit == null ? 'Unknown' : formatCurrency(item.limit)} · ${item.apr == null ? 'APR unknown' : `${(item.apr * 100).toFixed(2)}%`}`; }
-function showToast(message) { const toast = byId('toast'); toast.textContent = message; toast.hidden = false; window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 4200); }
+function initialiseNotificationLayer() {
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.some(({ target }) => target instanceof HTMLDialogElement && target.open)) {
+      queueMicrotask(() => syncNotificationLayer(true));
+    }
+  });
+  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
+}
+function syncNotificationLayer(promote = false) {
+  const layer = byId('notificationLayer');
+  const shouldShow = !byId('toast').hidden || !byId('updateNotificationRegion').hidden;
+  if (!layer.showPopover) {
+    layer.hidden = !shouldShow;
+    return;
+  }
+  const isOpen = layer.matches(':popover-open');
+  if (!shouldShow) {
+    if (isOpen) layer.hidePopover();
+    return;
+  }
+  if (isOpen && promote) layer.hidePopover();
+  if (!layer.matches(':popover-open')) layer.showPopover();
+}
+function showToast(message) {
+  const toast = byId('toast');
+  toast.textContent = message;
+  toast.hidden = false;
+  syncNotificationLayer(true);
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => {
+    toast.hidden = true;
+    syncNotificationLayer();
+  }, 4200);
+}
