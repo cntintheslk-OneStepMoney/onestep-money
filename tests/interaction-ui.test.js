@@ -13,8 +13,39 @@ test('save and document import actions are explicit guarded single-click control
   }
   assert.match(renderer, /bindSingleClickAction\('saveEditButton', 'Saving…', saveEditor\)/);
   assert.match(renderer, /bindSingleClickAction\('confirmImportButton', 'Importing…', confirmCurrentImport, syncConfirmImportButton\)/);
+  assert.match(renderer, /bindSingleClickAction\('saveSettingsButton', 'Saving…', saveSettings\)/);
   assert.match(renderer, /button\.setAttribute\('aria-busy', 'true'\)/);
   assert.match(renderer, /if \(button\.disabled \|\| button\.getAttribute\('aria-busy'\) === 'true'\) return/);
+});
+
+test('primary controls have explicit button behaviour and dialogs expose accessible titles', async () => {
+  const html = await fs.readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const buttons = [...html.matchAll(/<button\b[^>]*>/g)].map((match) => match[0]);
+  assert.ok(buttons.length > 0);
+  for (const button of buttons) assert.match(button, /type="(?:button|submit)"/);
+
+  for (const [dialogId, titleId] of [
+    ['editDialog', 'editTitle'], ['importDialog', 'importTitle'], ['importResultDialog', 'importResultTitle'],
+    ['diagnosticsDialog', 'diagnosticsDialogTitle'], ['restoreDialog', 'restoreDialogTitle'], ['freshStartDialog', 'freshStartDialogTitle']
+  ]) {
+    assert.match(html, new RegExp(`id="${dialogId}"[^>]*aria-labelledby="${titleId}"`));
+    assert.match(html, new RegExp(`id="${titleId}"`));
+  }
+});
+
+test('payments pagination reports full-result counts and has keyboard-operable navigation', async () => {
+  const [html, renderer] = await Promise.all([
+    fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="transactionCount"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="transactionPagination"[^>]*aria-label="Payments pages"/);
+  assert.match(html, /id="transactionPreviousPage"[^>]*type="button"/);
+  assert.match(html, /id="transactionNextPage"[^>]*type="button"/);
+  assert.match(renderer, /filterTransactionLedger\(ledgerIndex/);
+  assert.match(renderer, /paginateTransactionLedger\(rows, transactionPage\)/);
+  assert.doesNotMatch(renderer, /rows\.slice\(0, 300\)/);
 });
 
 test('all transient and update notifications share a promoted browser top layer', async () => {

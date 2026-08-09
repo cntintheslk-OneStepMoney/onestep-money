@@ -11,6 +11,10 @@ import {
   applyUpdateStatus, createUpdateUiState, dismissUpdateNotification as dismissUpdateUiNotification,
   setInstalledVersion, updateUiView
 } from './update-ui.js';
+import {
+  buildTransactionLedgerIndex, filterTransactionLedger, INCOME_PAYMENT_CATEGORY_VALUE,
+  paginateTransactionLedger
+} from './transaction-ledger.js';
 
 let state;
 let encryption;
@@ -28,7 +32,8 @@ let updateUiState = createUpdateUiState();
 let normalEventsBound = false;
 let recoveryEventsBound = false;
 let restoreEventsBound = false;
-const INCOME_PAYMENT_CATEGORY_VALUE = 'payment-category:income';
+let transactionPage = 1;
+let financialViewCache = null;
 
 const viewMeta = {
   today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
@@ -278,7 +283,11 @@ function formatRecoveryDate(value) {
 function bindEvents() {
   bindRestoreEvents();
   document.querySelectorAll('.nav-button').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.view)));
-  byId('monthSelect').addEventListener('change', async () => { state.settings.selectedMonth = byId('monthSelect').value; await saveAndRender(); });
+  byId('monthSelect').addEventListener('change', async () => {
+    state.settings.selectedMonth = byId('monthSelect').value;
+    transactionPage = 1;
+    await saveAndRender();
+  });
   byId('completeActionButton').addEventListener('click', completeNextAction);
   byId('snoozeActionButton').addEventListener('click', snoozeNextAction);
   byId('quickCheckInButton').addEventListener('click', logCheckIn);
@@ -289,7 +298,20 @@ function bindEvents() {
     const saved = await window.financeAPI.exportCsv(exportTransactionsCsv(state.transactions));
     if (saved) showToast('Payments exported safely.');
   });
-  [byId('transactionSearch'), byId('transactionAccountFilter'), byId('transactionTypeFilter'), byId('transactionCategoryFilter')].forEach((element) => element.addEventListener('input', renderTransactions));
+  [byId('transactionSearch'), byId('transactionAccountFilter'), byId('transactionTypeFilter'), byId('transactionCategoryFilter')].forEach((element) => element.addEventListener('input', () => {
+    transactionPage = 1;
+    renderTransactions();
+  }));
+  byId('transactionPreviousPage').addEventListener('click', () => {
+    transactionPage = Math.max(1, transactionPage - 1);
+    renderTransactions();
+    focusTransactionTable();
+  });
+  byId('transactionNextPage').addEventListener('click', () => {
+    transactionPage += 1;
+    renderTransactions();
+    focusTransactionTable();
+  });
   document.querySelectorAll('[data-add]').forEach((button) => button.addEventListener('click', () => openEditor(button.dataset.add)));
   byId('transactionRows').addEventListener('click', handleEditClick);
   byId('debtCards').addEventListener('click', handleEditClick);
@@ -310,7 +332,7 @@ function bindEvents() {
   byId('guideForm').addEventListener('submit', askGuide);
   document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventListener('click', () => { byId('guideQuestion').value = button.dataset.prompt; byId('guideQuestion').focus(); }));
   byId('checkModelButton').addEventListener('click', checkModel);
-  byId('saveSettingsButton').addEventListener('click', saveSettings);
+  bindSingleClickAction('saveSettingsButton', 'Saving…', saveSettings);
   byId('createBackupButton').addEventListener('click', createBackup);
   byId('restoreBackupButton').addEventListener('click', restoreBackup);
   byId('checkUpdateButton').addEventListener('click', checkForUpdates);
@@ -420,31 +442,22 @@ function renderDailyCompletion() {
 }
 
 function renderTransactions() {
-  const search = byId('transactionSearch').value.trim().toLowerCase();
-  const account = byId('transactionAccountFilter').value;
-  const type = byId('transactionTypeFilter').value;
-  const category = byId('transactionCategoryFilter').value;
-  const accountNames = new Map(state.accounts.map((item) => [item.id, item.name]));
-  const budgetAnalysis = calculateBudgetAnalysis(state);
-  const budgetByTransaction = new Map();
-  for (const budget of budgetAnalysis.rows) for (const contribution of budget.contributions) budgetByTransaction.set(contribution.id, budget);
-  const uncategorised = new Set(budgetAnalysis.uncategorisedTransactionIds);
-  const rows = state.transactions
-    .filter((item) => state.settings.selectedMonth === ALL_TIME_PERIOD || String(item.budgetMonth || item.date).startsWith(state.settings.selectedMonth))
-    .filter((item) => account === 'all' || item.accountId === account)
-    .filter((item) => type === 'all' || (type === 'incoming' && item.incoming > 0) || (type === 'outgoing' && item.outgoing > 0) || (type === 'transfer' && item.transferStatus !== 'no'))
-    .filter((item) => category === 'all'
-      || (category === 'uncategorised' ? uncategorised.has(item.id)
-        : category === INCOME_PAYMENT_CATEGORY_VALUE ? isIncomePayment(item)
-          : budgetByTransaction.get(item.id)?.id === category))
-    .filter((item) => !search || [item.description, item.userDescription, budgetByTransaction.get(item.id)?.category, item.category, item.notes].join(' ').toLowerCase().includes(search))
-    .sort((left, right) => left.date.localeCompare(right.date) || Number(left.sourceRow || 0) - Number(right.sourceRow || 0));
+  const { ledgerIndex } = getFinancialViewCache();
+  const rows = filterTransactionLedger(ledgerIndex, {
+    period: state.settings.selectedMonth,
+    search: byId('transactionSearch').value,
+    account: byId('transactionAccountFilter').value,
+    type: byId('transactionTypeFilter').value,
+    category: byId('transactionCategoryFilter').value
+  });
+  const page = paginateTransactionLedger(rows, transactionPage);
+  transactionPage = page.page;
   const body = byId('transactionRows');
   clear(body);
-  for (const item of rows.slice(0, 300)) {
+  for (const item of page.items) {
     const row = document.createElement('tr');
     row.append(cell(formatDate(item.date)));
-    row.append(cell(accountNames.get(item.accountId) || item.accountId || 'Unassigned'));
+    row.append(cell(ledgerIndex.accountNames.get(item.accountId) || item.accountId || 'Unassigned'));
     const description = cell();
     description.className = 'description-cell';
     append(description, element('strong', '', item.userDescription || item.description));
@@ -452,7 +465,7 @@ function renderTransactions() {
     const badges = document.createElement('span');
     badges.className = 'note-preview';
     badges.textContent = isIncomePayment(item) ? INCOME_PAYMENT_CATEGORY
-      : budgetByTransaction.get(item.id)?.category || (uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
+      : ledgerIndex.budgetByTransaction.get(item.id)?.category || (ledgerIndex.uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
     if (item.transferStatus !== 'no') badges.textContent += ` · ${item.transferStatus} transfer`;
     if (item.duplicateStatus === 'possible') {
       const duplicateLabel = item.reviewStatus === 'accepted' ? 'accepted possible duplicate'
@@ -472,7 +485,13 @@ function renderTransactions() {
   if (!rows.length) {
     const row = document.createElement('tr'); const empty = cell('No payments match these filters.'); empty.colSpan = 8; row.append(empty); body.append(row);
   }
-  byId('transactionCount').textContent = rows.length > 300 ? `Showing 300 of ${rows.length} payments. Narrow the search to see a specific item.` : `${rows.length} payment${rows.length === 1 ? '' : 's'} shown.`;
+  byId('transactionCount').textContent = page.totalRows
+    ? `Showing ${page.start}–${page.end} of ${page.totalRows} matching payment${page.totalRows === 1 ? '' : 's'}.`
+    : '0 matching payments.';
+  byId('transactionPageStatus').textContent = `Page ${page.page} of ${page.totalPages}`;
+  byId('transactionPreviousPage').disabled = page.page <= 1;
+  byId('transactionNextPage').disabled = page.page >= page.totalPages;
+  byId('transactionPagination').hidden = page.totalPages <= 1;
 }
 
 function renderPay() {
@@ -570,7 +589,7 @@ function renderOverdrafts() {
 
 function renderBudget() {
   const summary = calculatePeriodSummary(state);
-  const analysis = calculateBudgetAnalysis(state);
+  const { budgetAnalysis: analysis } = getFinancialViewCache();
   const allTime = analysis.month === ALL_TIME_PERIOD;
   const monthWord = analysis.monthCount === 1 ? 'month' : 'months';
   byId('budgetPeriodHeading').textContent = allTime ? 'All-time plan versus actual' : 'Simple monthly plan';
@@ -998,7 +1017,7 @@ async function animateFocusPanel(className, duration) {
   const panel = document.querySelector('.focus-panel');
   if (!panel || panel.hidden) return;
   panel.classList.add(className);
-  await new Promise((resolve) => window.setTimeout(resolve, duration));
+  await new Promise((resolve) => { window.setTimeout(resolve, duration); });
   panel.classList.remove(className);
 }
 
@@ -1514,6 +1533,22 @@ async function deleteDiagnostics() {
   } finally {
     button.disabled = false;
   }
+}
+
+function getFinancialViewCache() {
+  if (financialViewCache?.state === state) return financialViewCache;
+  const budgetAnalysis = calculateBudgetAnalysis(state);
+  financialViewCache = {
+    state,
+    budgetAnalysis,
+    ledgerIndex: buildTransactionLedgerIndex(state, budgetAnalysis)
+  };
+  return financialViewCache;
+}
+
+function focusTransactionTable() {
+  byId('transactionTable').focus({ preventScroll: true });
+  byId('transactionTable').scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 async function saveAndRender() { await saveState(); render(); }

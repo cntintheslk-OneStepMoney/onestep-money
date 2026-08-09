@@ -54,6 +54,29 @@ test('diagnostics retain supported credit-report and statement classifications w
   assert.doesNotMatch(report.text, /1234\.56|12345678|private-|credit reference/);
 });
 
+test('parser compatibility diagnostics retain only approved classifications', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const logger = createLogger(directory);
+
+  await logger.record('DOCUMENT_IMPORT_FAILED', {
+    documentType: 'payslip', fileType: '.pdf', providerFamily: 'mynavy',
+    recognitionStage: 'required_fields', failureCategory: 'missing_required_fields', reconciliationOutcome: 'failed',
+    originalName: 'Private Person August Payslip.pdf', amount: 9876.54, documentText: 'Private account and address'
+  });
+  await logger.record('DOCUMENT_IMPORT_FAILED', {
+    documentType: 'statement', fileType: '.pdf', providerFamily: 'Unapproved Private Bank',
+    recognitionStage: 'private-stage', failureCategory: 'private-category', reconciliationOutcome: 'private-outcome'
+  });
+  const report = await logger.buildReport();
+
+  assert.match(report.text, /provider_family=mynavy/);
+  assert.match(report.text, /recognition_stage=required_fields/);
+  assert.match(report.text, /failure_category=missing_required_fields/);
+  assert.match(report.text, /reconciliation=failed/);
+  assert.doesNotMatch(report.text, /Private Person|9876|account and address|Unapproved Private Bank|private-stage|private-category|private-outcome/);
+});
+
 test('detailed diagnostics are not written when secure storage is unavailable', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-diagnostics-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

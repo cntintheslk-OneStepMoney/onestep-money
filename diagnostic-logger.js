@@ -18,7 +18,10 @@ const EVENT_DEFINITIONS = Object.freeze({
   STATE_SAVE_FAILED: { level: 'error', reference: 'DAT-102', stage: 'state_save', layer: 'detail' },
   STATE_RECOVERY_REQUIRED: { level: 'error', reference: 'DAT-103', stage: 'state_recovery', layer: 'detail', fields: ['reasonCode'] },
   RECOVERY_OPERATION_FAILED: { level: 'error', reference: 'DAT-104', stage: 'state_recovery', layer: 'detail', fields: ['reasonCode'] },
-  DOCUMENT_IMPORT_FAILED: { level: 'error', reference: 'IMP-101', stage: 'document_import', layer: 'detail', fields: ['documentType', 'fileType'] },
+  DOCUMENT_IMPORT_FAILED: {
+    level: 'error', reference: 'IMP-101', stage: 'document_import', layer: 'detail',
+    fields: ['documentType', 'fileType', 'providerFamily', 'recognitionStage', 'failureCategory', 'reconciliationOutcome']
+  },
   DOCUMENT_OPEN_FAILED: { level: 'error', reference: 'DOC-101', stage: 'document_open', layer: 'detail' },
   DOCUMENT_DELETE_FAILED: { level: 'error', reference: 'DOC-102', stage: 'document_delete', layer: 'detail' },
   BACKUP_CREATE_FAILED: { level: 'error', reference: 'BAK-101', stage: 'backup_create', layer: 'detail' },
@@ -42,6 +45,10 @@ const FAULT_CLASSIFIERS = [
 
 const ALLOWED_DOCUMENT_TYPES = new Set(['statement', 'payslip', 'credit-report']);
 const ALLOWED_FILE_TYPES = new Set(['pdf', 'csv', 'tsv', 'txt', 'qif', 'ofx', 'qfx', 'json']);
+const ALLOWED_PROVIDER_FAMILIES = new Set(['mynavy', 'jpa', 'experian', 'equifax', 'transunion', 'lloyds', 'halifax', 'bank-of-scotland', 'generic', 'unknown']);
+const ALLOWED_RECOGNITION_STAGES = new Set(['file_validation', 'provider_detection', 'layout_detection', 'required_fields', 'reconciliation', 'parser']);
+const ALLOWED_FAILURE_CATEGORIES = new Set(['unsupported_layout', 'missing_required_fields', 'invalid_input', 'no_records', 'reconciliation_failed', 'parser_exception']);
+const ALLOWED_RECONCILIATION_OUTCOMES = new Set(['passed', 'review_required', 'failed', 'not_available']);
 const ALLOWED_REASON_CODES = new Set([
   'state_not_found', 'read_failure', 'decryption_failure', 'encryption_key_unavailable',
   'invalid_content', 'schema_validation_failure', 'migration_failure', 'unknown_storage_failure',
@@ -153,6 +160,10 @@ export class DiagnosticLogger {
       const details = [
         entry.documentType ? `document_type=${entry.documentType}` : '',
         entry.fileType ? `file_type=${entry.fileType}` : '',
+        entry.providerFamily ? `provider_family=${entry.providerFamily}` : '',
+        entry.recognitionStage ? `recognition_stage=${entry.recognitionStage}` : '',
+        entry.failureCategory ? `failure_category=${entry.failureCategory}` : '',
+        entry.reconciliationOutcome ? `reconciliation=${entry.reconciliationOutcome}` : '',
         entry.reasonCode ? `reason_code=${entry.reasonCode}` : '',
         entry.fault?.name ? `fault=${entry.fault.name}` : '',
         entry.fault?.classification ? `classification=${entry.fault.classification}` : ''
@@ -308,6 +319,10 @@ function normaliseStoredEntry(entry) {
 
 function sanitiseField(field, value) {
   if (field === 'documentType') return ALLOWED_DOCUMENT_TYPES.has(value) ? value : null;
+  if (field === 'providerFamily') return ALLOWED_PROVIDER_FAMILIES.has(value) ? value : null;
+  if (field === 'recognitionStage') return ALLOWED_RECOGNITION_STAGES.has(value) ? value : null;
+  if (field === 'failureCategory') return ALLOWED_FAILURE_CATEGORIES.has(value) ? value : null;
+  if (field === 'reconciliationOutcome') return ALLOWED_RECONCILIATION_OUTCOMES.has(value) ? value : null;
   if (field === 'reasonCode') return ALLOWED_REASON_CODES.has(value) ? value : null;
   if (field === 'fileType') {
     const extension = String(value || '').toLowerCase().replace(/^\./, '');

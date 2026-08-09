@@ -54,7 +54,9 @@ app.whenReady().then(async () => {
     extractPdfDocument,
     parseImportedDocument,
     canonicalDocumentName,
-    recordFailure: (error, documentType, fileType) => diagnostics.record('DOCUMENT_IMPORT_FAILED', { error, documentType, fileType }).catch(() => ({ reference: 'IMP-101' }))
+    recordFailure: (error, documentType, fileType, context = {}) => diagnostics.record('DOCUMENT_IMPORT_FAILED', {
+      error, documentType, fileType, ...context
+    }).catch(() => ({ reference: 'IMP-101' }))
   });
   registerVaultProtocol();
   registerIpcHandlers();
@@ -102,7 +104,7 @@ function createWindow() {
 
   if (process.argv.includes('--capture-ui')) {
     mainWindow.webContents.once('did-finish-load', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => { setTimeout(resolve, 1200); });
       const image = await mainWindow.webContents.capturePage();
       const capturePath = process.env.FINANCE_CAPTURE_PATH || path.join(__dirname, 'tmp', 'finance-ui.png');
       await fs.mkdir(path.dirname(capturePath), { recursive: true });
