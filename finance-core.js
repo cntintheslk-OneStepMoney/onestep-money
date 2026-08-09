@@ -1,5 +1,6 @@
 import { localFinancialMonthKey } from './date-utils.js';
-import { activeReviewItems, reviewItemPresentation, synchroniseReviewItems } from './review-lifecycle.js';
+import { synchroniseReviewItems } from './review-lifecycle.js';
+import { prioritySnapshot } from './next-move-priority.js';
 
 export const SCHEMA_VERSION = 8;
 export const ALL_TIME_PERIOD = 'all';
@@ -235,46 +236,28 @@ function budgetUsageRatio(row) {
 }
 
 export function buildNextAction(state, now = new Date()) {
-  const today = localDateKey(now);
-  const isSnoozed = (id) => String(state.settings?.snoozedActions?.[id] || '') > today;
-  synchroniseReviewItems(state, now);
-  const reviewItem = activeReviewItems(state, now)[0];
-  if (reviewItem) {
-    const presentation = reviewItemPresentation(reviewItem, state);
-    return {
-      id: `generated-review-${reviewItem.id}`,
-      reviewId: reviewItem.id,
-      completeDirect: reviewItem.type === 'generated_action',
-      title: presentation.title,
-      detail: presentation.detail,
-      timeframe: reviewItem.type === 'uncategorised_payment' ? '2 min' : '10 min',
-      stage: reviewItem.priority === 'high' ? 'today' : 'this week'
-    };
-  }
-
-  const checkIn = { id: 'generated-checkin', title: 'Complete a five-minute check-in', detail: 'Update one balance, then stop. Consistency matters more than perfection.', timeframe: '5 min', stage: 'today' };
-  if (!(state.accounts || []).length) {
-    const firstAccount = { id: 'generated-first-account', title: 'Add your first account', detail: 'Open Settings, add one bank account, then stop. No balances need to be perfect yet.', timeframe: '5 min', stage: 'today' };
-    return isSnoozed(firstAccount.id) ? checkIn : firstAccount;
-  }
-  if (!(state.transactions || []).some(isTransactionFinanciallyActive)) {
-    const firstImport = { id: 'generated-first-import', title: 'Import one recent statement', detail: 'Choose one account and review the preview before accepting any payments.', timeframe: '10 min', stage: 'today' };
-    return isSnoozed(firstImport.id) ? checkIn : firstImport;
-  }
-
-  const safety = debtSafetyAssessment(state);
-  const conflict = safety.accounts.find((item) => item.reasonCodes.includes('conflicting_status'));
-  if (conflict && !isSnoozed('generated-debt-conflict')) return { id: 'generated-debt-conflict', title: `Check the status of ${conflict.name}`, detail: 'OneStep has conflicting information for this account. Confirm its current status before making an extra debt payment.', timeframe: '10 min', stage: 'today' };
-  const arrangement = safety.accounts.find((item) => ['default_arrangement_unresolved', 'arrears_arrangement_unresolved', 'unknown_arrangement', 'unknown_arrangement_payment'].some((code) => item.reasonCodes.includes(code)));
-  if (arrangement && !isSnoozed('generated-arrangement')) return { id: 'generated-arrangement', title: 'Check your payment arrangement', detail: `OneStep does not yet have enough confirmed arrangement information for ${arrangement.name} to recommend an extra payment safely.`, timeframe: '10 min', stage: 'today' };
-  const missing = safety.accounts.find((item) => ['unknown_status', 'unknown_required_payment', 'unknown_credit_limit'].some((code) => item.reasonCodes.includes(code)));
-  if (missing && !isSnoozed('generated-debt-details')) return { id: 'generated-debt-details', title: `Confirm the details for ${missing.name}`, detail: 'Check the account status, required payment and limit where relevant. Unknown information is not being treated as safe.', timeframe: '10 min', stage: 'this week' };
-  const overLimit = safety.accounts.find((item) => item.overLimit);
-  if (overLimit && !isSnoozed('generated-overlimit')) return { id: 'generated-overlimit', title: `Check ${overLimit.name}`, detail: 'Confirm the amount above the limit and protect essential payments before making an optional payment elsewhere.', timeframe: '10 min', stage: 'today' };
-  const arrears = safety.accounts.find((item) => ['arrears', 'defaulted'].includes(item.effectiveStatus));
-  if (arrears && !isSnoozed('generated-arrears')) return { id: 'generated-arrears', title: `Confirm the plan for ${arrears.name}`, detail: arrears.arrangementStatus === 'confirmed' ? 'The agreed payment is protected. Check that the recorded amount and account status are still current.' : 'Record the agreed payment and whether interest or charges are frozen.', timeframe: '10 min', stage: 'this week' };
-  if (!isSnoozed(checkIn.id)) return checkIn;
-  return { id: 'generated-paused', title: 'Nothing else needs your attention today', detail: 'Your available steps are snoozed. Come back tomorrow, or use another page if you choose to update something now.', timeframe: 'Done', stage: 'today', passive: true };
+  const snapshot = prioritySnapshot(state, now, { safetyAssessment: debtSafetyAssessment(state) });
+  if (!snapshot.nextMove) return {
+    id: 'next-move-caught-up', title: 'You’re caught up for now',
+    detail: snapshot.lowPriorityRemaining
+      ? 'Lower-priority housekeeping remains available in Review Inbox, but nothing needs to take over Today.'
+      : 'There is no unresolved work worth surfacing today.',
+    timeframe: 'Done', stage: 'today', passive: true
+  };
+  const next = snapshot.nextMove;
+  const task = next.item.sourceType === 'task' ? (state.tasks || []).find((entry) => String(entry.id) === next.item.sourceId) : null;
+  return {
+    id: `next-move-${next.item.id}`,
+    reviewId: next.item.id,
+    completeDirect: next.item.type === 'generated_action' && !task?.actionView && !task?.view,
+    title: next.title,
+    detail: next.detail,
+    timeframe: next.timeframe,
+    stage: 'today',
+    priorityBand: next.priorityBand,
+    priorityReason: next.priorityReason,
+    actionLabel: next.actionLabel
+  };
 }
 
 export function hasCompletedCheckIn(checkIns = [], now = new Date()) {

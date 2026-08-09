@@ -53,6 +53,8 @@ export function synchroniseReviewItems(state, now = new Date()) {
       previous.status = REVIEW_STATUS.NEEDS_ATTENTION;
       previous.resolution = null;
       previous.snoozedUntil = null;
+      previous.snoozeCount = 0;
+      previous.lastSnoozedAt = null;
       changed = true;
     }
     if (changed) previous.updatedAt = timestamp;
@@ -142,7 +144,9 @@ export function snoozeReviewItem(state, itemId, choice, now = new Date()) {
   }
   item.status = REVIEW_STATUS.SNOOZED;
   item.snoozedUntil = snoozedUntil;
-  item.updatedAt = validDate(now).toISOString();
+  item.snoozeCount = nonNegativeInteger(item.snoozeCount) + 1;
+  item.lastSnoozedAt = validDate(now).toISOString();
+  item.updatedAt = item.lastSnoozedAt;
   return state;
 }
 
@@ -208,7 +212,13 @@ export function reviewRoute(item, state = {}) {
     const batch = (state.importBatches || []).find((entry) => String(entry.id) === item.sourceId);
     return { view: batch?.kind === 'statement' ? 'transactions' : 'debts', type: 'importBatch', id: item.sourceId };
   }
-  if (item.sourceType === 'task') return { view: 'today', type: 'task', id: item.sourceId };
+  if (item.sourceType === 'task') {
+    const task = (state.tasks || []).find((entry) => String(entry.id) === item.sourceId);
+    const view = ['today', 'review', 'transactions', 'pay', 'debts', 'overdrafts', 'budget', 'documents', 'settings']
+      .includes(task?.actionView || task?.view) ? (task.actionView || task.view) : 'today';
+    const targetType = ['transaction', 'debt', 'overdraft'].includes(task?.targetType) ? task.targetType : null;
+    return { view, type: 'task', id: item.sourceId, targetType, targetId: String(task?.targetId || '') };
+  }
   return { view: 'review' };
 }
 
@@ -454,12 +464,15 @@ function migrateReviewItem(item, now) {
   const resolution = status === REVIEW_STATUS.RESOLVED && item.resolution && typeof item.resolution === 'object' && validIso(item.resolution.resolvedAt)
     ? { decision: safeToken(item.resolution.decision, 60) || 'source_resolved', resolvedAt: item.resolution.resolvedAt }
     : null;
+  const snoozeCount = nonNegativeInteger(item.snoozeCount);
+  const lastSnoozedAt = snoozeCount > 0 && validIso(item.lastSnoozedAt) ? item.lastSnoozedAt : null;
   const migratedStatus = (status === REVIEW_STATUS.SNOOZED && !snoozedUntil) || (status === REVIEW_STATUS.RESOLVED && !resolution)
     ? REVIEW_STATUS.NEEDS_ATTENTION : status;
   return {
     id: reviewItemId(type, sourceType, sourceId), type, status: migratedStatus,
     priority, createdAt, updatedAt, snoozedUntil, sourceType, sourceId,
-    groupKey: String(item.groupKey || '').slice(0, 160), conditionKey: String(item.conditionKey || '').slice(0, 500), resolution: migratedStatus === REVIEW_STATUS.RESOLVED ? resolution : null
+    groupKey: String(item.groupKey || '').slice(0, 160), conditionKey: String(item.conditionKey || '').slice(0, 500),
+    resolution: migratedStatus === REVIEW_STATUS.RESOLVED ? resolution : null, snoozeCount, lastSnoozedAt
   };
 }
 
@@ -467,7 +480,8 @@ function createReviewItem(source, id, timestamp) {
   return {
     id, type: source.type, status: REVIEW_STATUS.NEEDS_ATTENTION, priority: source.priority,
     createdAt: timestamp, updatedAt: timestamp, snoozedUntil: null,
-    sourceType: source.sourceType, sourceId: String(source.sourceId), groupKey: source.groupKey || '', conditionKey: source.conditionKey || '', resolution: null
+    sourceType: source.sourceType, sourceId: String(source.sourceId), groupKey: source.groupKey || '', conditionKey: source.conditionKey || '',
+    resolution: null, snoozeCount: 0, lastSnoozedAt: null
   };
 }
 
@@ -529,6 +543,7 @@ function displayMerchant(transaction) { return String(transaction?.userDescripti
 function displayGroupMerchant(transaction) { return displayMerchant(transaction).replace(/\b\d+\b/g, '').replace(/\s+/g, ' ').trim() || 'Related'; }
 function categoryConditionKey(transaction) { return [transaction.budgetCategoryId || '', transaction.category || '', transaction.categorySource || '', transaction.budgetTreatment || ''].join('|'); }
 function knownNonNegative(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0; }
+function nonNegativeInteger(value) { const number = Number(value); return Number.isInteger(number) && number >= 0 ? number : 0; }
 function finiteOrNull(value) { return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value); }
 function revolvingCredit(item) { return /credit card|store card|revolving|catalogue/i.test(String(item?.type || '')); }
 function formatMoney(value) { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(Number(value || 0)); }

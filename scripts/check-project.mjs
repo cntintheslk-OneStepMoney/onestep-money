@@ -28,6 +28,7 @@ if (!packageJson.dependencies?.['electron-updater']) throw new Error('The instal
 if (!packageJson.build?.files?.includes('diagnostic-logger.js')) throw new Error('The diagnostic logger is missing from packaged builds.');
 if (!packageJson.build?.files?.includes('transaction-ledger.js')) throw new Error('The paginated transaction ledger is missing from packaged builds.');
 if (!packageJson.build?.files?.includes('review-lifecycle.js')) throw new Error('The persisted review lifecycle is missing from packaged builds.');
+if (!packageJson.build?.files?.includes('next-move-priority.js')) throw new Error('The derived Next Move priority engine is missing from packaged builds.');
 if (packageJson.scripts?.lint !== 'eslint .') throw new Error('The correctness-focused static analysis command is not configured.');
 
 console.log(JSON.stringify({ javascriptFiles: javascript.length, seedCollections: emptyCollections.length, package: packageJson.name, version: packageJson.version }));

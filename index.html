@@ -79,15 +79,18 @@
 
         <section id="view-today" class="view active" aria-labelledby="viewTitle">
           <article id="welcomeBackPanel" class="welcome-back" hidden><div><p class="eyebrow">WELCOME BACK</p><h2>Welcome back</h2><p id="welcomeBackText">A few things are worth checking.</p></div><button id="welcomeBackReviewButton" class="secondary-button" type="button">Open Review Inbox</button></article>
-          <article class="focus-panel">
-            <div class="focus-copy"><div class="step-emblem" aria-hidden="true"><span>1</span></div><div><p class="eyebrow">IMMEDIATE ACTION</p><h2 id="nextActionTitle">Loading your next action…</h2><p id="nextActionDetail"></p></div></div>
-            <div class="focus-actions"><span id="nextActionTime" class="time-chip">10 min</span><button id="completeActionButton" class="primary-button" type="button">Complete &amp; finish</button><button id="snoozeActionButton" class="secondary-button" type="button">Snooze 1 day</button></div>
+          <p id="todayProgressStatus" class="sr-only" role="status" aria-live="polite"></p>
+          <article class="focus-panel" aria-labelledby="nextActionTitle">
+            <div class="focus-copy"><div class="step-emblem" aria-hidden="true"><span>1</span></div><div><div class="next-move-meta"><p class="eyebrow">NEXT MOVE</p><span id="nextMoveBand" class="next-move-band">Important</span></div><h2 id="nextActionTitle">Loading your next move…</h2><p id="nextActionDetail"></p><details id="nextMoveWhy" class="next-move-why"><summary>Why?</summary><p id="nextMoveWhyText"></p></details></div></div>
+            <div class="focus-actions"><span id="nextActionTime" class="time-chip">10 min</span><button id="completeActionButton" class="primary-button" type="button">Do it</button><button id="snoozeActionButton" class="secondary-button" type="button">Snooze</button></div>
           </article>
           <div id="dailyCompleteState" class="daily-complete" hidden>
             <span class="daily-complete-icon" aria-hidden="true">✓</span>
-            <div><strong>Today’s check-in is complete</strong><p>You have done enough for today. Your next clear move will be waiting tomorrow.</p></div>
+            <div><strong id="dailyCompleteTitle">You’re caught up for now</strong><p id="dailyCompleteText">There is no unresolved work worth surfacing today.</p></div>
           </div>
           <p class="permission-slip"><span aria-hidden="true">✓</span>No catching up. No perfect spreadsheet. Finish this one step, then close the app.</p>
+
+          <section id="todaySupportingSection" class="today-supporting" hidden aria-labelledby="todaySupportingTitle"><div class="section-heading"><div><h2 id="todaySupportingTitle">Also worth doing today</h2><p>A short supporting list. Everything else remains in Review Inbox.</p></div></div><div id="todaySupportingList" class="today-supporting-list"></div></section>
 
           <div class="metric-grid">
             <article class="metric-card"><span>Planned safety margin</span><strong id="marginValue">£0.00</strong><small id="marginHint">From entered items</small></article>
@@ -98,14 +101,14 @@
 
           <div class="two-column">
             <article class="panel"><div class="panel-heading"><div><p class="eyebrow">QUICK READ</p><h2>What needs attention</h2></div></div><div id="checksList" class="checks-list"></div></article>
-            <article class="panel encouragement-panel"><p class="eyebrow">FIVE-MINUTE CHECK-IN</p><h2 id="momentumTitle">Showing up counts</h2><div class="progress-track"><span id="bufferProgress"></span></div><p id="momentumText"></p><div id="checkInReviewList" class="check-in-review-list"></div><button id="quickCheckInButton" class="secondary-button" type="button">Complete five-minute check-in</button><p id="checkInStatus" class="check-in-status">Use this when you reviewed your money but did not finish the action above.</p></article>
+            <article class="panel encouragement-panel"><p class="eyebrow">FIVE-MINUTE MONEY CHECK-IN</p><h2 id="momentumTitle">Showing up counts</h2><div class="progress-track"><span id="bufferProgress"></span></div><p id="momentumText"></p><div id="checkInReviewList" class="check-in-review-list"></div><button id="quickCheckInButton" class="secondary-button" type="button">Finish check-in for today</button><p id="checkInStatus" class="check-in-status">Use this when you reviewed your money but did not finish the action above.</p></article>
           </div>
         </section>
 
         <section id="view-review" class="view" hidden aria-labelledby="viewTitle">
           <div class="review-hero">
             <div><p class="eyebrow">ONE PLACE FOR UNFINISHED WORK</p><h2 id="reviewSummaryTitle">Nothing needs reviewing right now</h2><p id="reviewSummaryText">OneStep will put work here only when a decision or correction is genuinely needed.</p></div>
-            <div class="review-summary-counts" aria-label="Review Inbox summary"><span><strong id="reviewImportantCount">0</strong> important</span><span><strong id="reviewNormalCount">0</strong> normal</span><span><strong id="reviewSnoozedCount">0</strong> snoozed</span></div>
+            <div class="review-summary-counts" aria-label="Review Inbox summary"><span><strong id="reviewCriticalCount">0</strong> critical</span><span><strong id="reviewImportantCount">0</strong> important</span><span><strong id="reviewNormalCount">0</strong> other</span><span><strong id="reviewSnoozedCount">0</strong> snoozed</span></div>
           </div>
           <p id="reviewInboxStatus" class="sr-only" role="status" aria-live="polite"></p>
           <div id="reviewDoneState" class="review-done" hidden><span aria-hidden="true">✓</span><div><strong>Nothing needs reviewing right now</strong><p>OneStep has no unresolved work that needs your judgement.</p></div></div>

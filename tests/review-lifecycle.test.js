@@ -6,6 +6,7 @@ import test from 'node:test';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from '../credit-report-intelligence.js';
 import { FinanceDataStore, RECOVERY_MODES, RecoveryModeError } from '../data-store.js';
 import { debtSafetyAssessment } from '../finance-core.js';
+import { prioritySnapshot } from '../next-move-priority.js';
 import {
   activeReviewItems, groupReviewItems, resolveReviewItem, reviewInboxSummary,
   snoozeReviewItem, startReviewItem, synchroniseReviewItems
@@ -150,7 +151,9 @@ test('active, in-progress, snoozed and resolved review state survives restart an
   assert.equal(state.reviewItems.find((item) => item.sourceId === 'active').status, 'needs_attention');
   assert.equal(state.reviewItems.find((item) => item.sourceId === 'progress').status, 'in_progress');
   assert.equal(state.reviewItems.find((item) => item.sourceId === 'snoozed').status, 'snoozed');
+  assert.equal(state.reviewItems.find((item) => item.sourceId === 'snoozed').snoozeCount, 1);
   assert.equal(state.reviewItems.find((item) => item.sourceId === 'resolved').status, 'resolved');
+  assert.equal(prioritySnapshot(state, new Date('2026-08-09T12:00:00.000Z')).nextMove.item.sourceId, 'progress');
 
   const backupPath = path.join(harness.directory, 'review-state.osmb');
   await restarted.createPortableBackup(backupPath, 'fictional-passphrase', state);
@@ -160,7 +163,9 @@ test('active, in-progress, snoozed and resolved review state survives restart an
   const restored = await restarted.restorePortableBackup(backupPath, 'fictional-passphrase');
   assert.equal(restored.status, 'restored');
   assert.equal(restored.state.reviewItems.find((item) => item.sourceId === 'snoozed').status, 'snoozed');
+  assert.equal(restored.state.reviewItems.find((item) => item.sourceId === 'snoozed').snoozeCount, 1);
   assert.equal(restored.state.reviewItems.find((item) => item.sourceId === 'resolved').resolution.decision, 'both_genuine');
+  assert.equal(prioritySnapshot(restored.state, new Date('2026-08-09T12:00:00.000Z')).nextMove.item.sourceId, 'progress');
 });
 
 test('recovery mode remains authoritative over duplicate decisions that mutate financial state', async (t) => {
@@ -234,7 +239,7 @@ function creditPreview() {
 async function createHarness(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-review-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const store = new FinanceDataStore(directory, seedPath, null, { secureStorage: secureStorage(), appVersion: '2.1.22' });
+  const store = new FinanceDataStore(directory, seedPath, null, { secureStorage: secureStorage(), appVersion: '2.1.23' });
   await store.initialise();
   return { directory, store };
 }
