@@ -1,7 +1,7 @@
 import {
-  availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
+  ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, removeBudgetCategory,
+  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, removeBudgetCategory, reportingPeriodMonthCount,
   resolvePossibleDuplicate
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
@@ -357,11 +357,18 @@ function render() {
   renderDailyCompletion();
   byId('marginValue').textContent = formatCurrency(summary.plannedMargin);
   byId('cashFlowValue').textContent = formatCurrency(summary.netCashFlow);
+  const allTime = month === ALL_TIME_PERIOD;
+  const periodHint = allTime ? `All trusted data · ${summary.monthCount} month${summary.monthCount === 1 ? '' : 's'}` : monthLabel(month);
+  byId('marginHint').textContent = allTime ? `${summary.monthCount} × monthly safety margin` : `Plan for ${periodHint}`;
+  byId('cashFlowHint').textContent = periodHint;
   byId('todayDebtValue').textContent = formatCurrency(summary.debts);
   byId('todayOverdraftValue').textContent = formatCurrency(summary.overdrafts);
   byId('grossPayValue').textContent = formatCurrency(summary.grossPay);
   byId('deductionsValue').textContent = formatCurrency(summary.payrollDeductions);
   byId('netPayValue').textContent = formatCurrency(summary.netPay);
+  byId('grossPayHint').textContent = periodHint;
+  byId('deductionsHint').textContent = allTime ? periodHint : 'Tax, NI and other deductions';
+  byId('netPayHint').textContent = allTime ? periodHint : 'Amount paid by payroll';
   byId('streakValue').textContent = calculateStreak(state.checkIns);
   renderChecks();
   renderMomentum();
@@ -420,7 +427,7 @@ function renderTransactions() {
   for (const budget of budgetAnalysis.rows) for (const contribution of budget.contributions) budgetByTransaction.set(contribution.id, budget);
   const uncategorised = new Set(budgetAnalysis.uncategorisedTransactionIds);
   const rows = state.transactions
-    .filter((item) => String(item.budgetMonth || item.date).startsWith(state.settings.selectedMonth))
+    .filter((item) => state.settings.selectedMonth === ALL_TIME_PERIOD || String(item.budgetMonth || item.date).startsWith(state.settings.selectedMonth))
     .filter((item) => account === 'all' || item.accountId === account)
     .filter((item) => type === 'all' || (type === 'incoming' && item.incoming > 0) || (type === 'outgoing' && item.outgoing > 0) || (type === 'transfer' && item.transferStatus !== 'no'))
     .filter((item) => category === 'all' || (category === 'uncategorised' ? uncategorised.has(item.id) : budgetByTransaction.get(item.id)?.id === category))
@@ -557,6 +564,16 @@ function renderOverdrafts() {
 function renderBudget() {
   const summary = calculatePeriodSummary(state);
   const analysis = calculateBudgetAnalysis(state);
+  const allTime = analysis.month === ALL_TIME_PERIOD;
+  const monthWord = analysis.monthCount === 1 ? 'month' : 'months';
+  byId('budgetPeriodHeading').textContent = allTime ? 'All-time plan versus actual' : 'Simple monthly plan';
+  byId('budgetPeriodDescription').textContent = allTime
+    ? `${analysis.monthCount} ${monthWord} of trusted data. Every monthly budget quantity and dependable income amount is multiplied by ${analysis.monthCount}.`
+    : `Plan versus actual for ${monthLabel(analysis.month)}. Dependable income first; variable income stays separate until it arrives.`;
+  byId('budgetIncomeLabel').textContent = allTime ? `Dependable income · ${analysis.monthCount} ${monthWord}` : 'Dependable income';
+  byId('plannedSpendingLabel').textContent = allTime ? `Planned · ${analysis.monthCount} ${monthWord}` : 'Planned';
+  byId('actualSpendingLabel').textContent = allTime ? 'Spent · all time' : 'Spent';
+  byId('budgetRemainingLabel').textContent = allTime ? 'Remaining · all time' : 'Remaining plan';
   byId('budgetIncomeValue').textContent = formatCurrency(summary.dependableIncome);
   byId('plannedSpendingValue').textContent = formatCurrency(analysis.planned);
   byId('actualSpendingValue').textContent = formatCurrency(analysis.actual);
@@ -582,11 +599,12 @@ function renderBudget() {
     remove.setAttribute('aria-label', `Remove ${item.category} from budget`);
     append(actions, edit, remove);
     append(line, summary, actions);
-    const status = item.actual < 0
+    let status = item.actual < 0
       ? `${formatCurrency(Math.abs(item.actual))} net refund`
       : item.remaining < 0
         ? `${formatCurrency(Math.abs(item.remaining))} over plan`
         : item.remaining === 0 ? 'Budget used' : `${formatCurrency(item.remaining)} remaining`;
+    if (allTime) status += ` · ${formatCurrency(item.monthlyPlanned)} per month × ${analysis.monthCount}`;
     const track = element('div', `budget-bar${item.remaining < 0 ? ' over' : ''}`);
     const bar = document.createElement('span'); bar.style.width = `${Math.min(100, item.progressPercent ?? (item.actual ? 100 : 0))}%`; track.append(bar);
     append(row, line, element('span', 'budget-status', status), track);
@@ -1454,13 +1472,18 @@ async function saveState(nextState = state) {
 function populateMonthOptions() {
   const months = synchroniseSelectedMonth();
   const select = byId('monthSelect'); clear(select);
+  const allTime = document.createElement('option');
+  const monthCount = reportingPeriodMonthCount(state, ALL_TIME_PERIOD);
+  allTime.value = ALL_TIME_PERIOD;
+  allTime.textContent = `All time · ${monthCount} month${monthCount === 1 ? '' : 's'}`;
+  select.append(allTime);
   for (const month of months) { const option = document.createElement('option'); option.value = month; option.textContent = monthLabel(month); select.append(option); }
   select.value = state.settings.selectedMonth;
 }
 
 function synchroniseSelectedMonth(targetState = state) {
   const months = availableReportingMonths(targetState);
-  if (!months.includes(targetState.settings.selectedMonth)) targetState.settings.selectedMonth = months[0];
+  if (targetState.settings.selectedMonth !== ALL_TIME_PERIOD && !months.includes(targetState.settings.selectedMonth)) targetState.settings.selectedMonth = months[0];
   return months;
 }
 
