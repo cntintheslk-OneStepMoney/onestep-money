@@ -25,6 +25,7 @@ if (Number(seed.settings?.extraDebtPayment || 0) !== 0) throw new Error('Public 
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 if (packageJson.name !== 'onestep-money' || packageJson.build?.productName !== 'OneStep Money') throw new Error('Package branding is inconsistent.');
 if (!packageJson.dependencies?.['electron-updater']) throw new Error('The installed update channel is not configured.');
+verifyPackagedRuntimeDependencies(packageJson.build?.files || []);
 if (!packageJson.build?.files?.includes('diagnostic-logger.js')) throw new Error('The diagnostic logger is missing from packaged builds.');
 if (!packageJson.build?.files?.includes('transaction-ledger.js')) throw new Error('The paginated transaction ledger is missing from packaged builds.');
 if (!packageJson.build?.files?.includes('review-lifecycle.js')) throw new Error('The persisted review lifecycle is missing from packaged builds.');
@@ -40,4 +41,44 @@ function walk(directory) {
     if (entry.isDirectory()) walk(target);
     else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs') || entry.name.endsWith('.cjs')) javascript.push(target);
   }
+}
+
+function verifyPackagedRuntimeDependencies(packagedEntries) {
+  const missing = [];
+  for (const entry of packagedEntries) {
+    if (!entry.endsWith('.js') && !entry.endsWith('.cjs')) continue;
+    const importerPath = path.join(root, entry);
+    if (!fs.existsSync(importerPath)) continue;
+    const source = fs.readFileSync(importerPath, 'utf8');
+    for (const specifier of localRuntimeSpecifiers(source)) {
+      const dependencyPath = resolveLocalRuntimeDependency(importerPath, specifier);
+      if (!dependencyPath) continue;
+      const relativeDependency = path.relative(root, dependencyPath).replaceAll(path.sep, '/');
+      if (!isPackaged(relativeDependency, packagedEntries)) missing.push(`${entry} -> ${relativeDependency}`);
+    }
+  }
+  if (missing.length) {
+    throw new Error(`Packaged runtime dependencies are missing from build.files:\n${[...new Set(missing)].sort().join('\n')}`);
+  }
+}
+
+function localRuntimeSpecifiers(source) {
+  const patterns = [
+    /\b(?:import|export)\s+(?:[^'\"]*?\s+from\s*)?['\"](\.[^'\"]+)['\"]/g,
+    /\bimport\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)/g,
+    /\brequire\s*\(\s*['\"](\.[^'\"]+)['\"]\s*\)/g
+  ];
+  return patterns.flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
+}
+
+function resolveLocalRuntimeDependency(importerPath, specifier) {
+  const candidate = path.resolve(path.dirname(importerPath), specifier);
+  for (const resolved of [candidate, `${candidate}.js`, `${candidate}.cjs`, path.join(candidate, 'index.js')]) {
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved;
+  }
+  return null;
+}
+
+function isPackaged(relativePath, packagedEntries) {
+  return packagedEntries.some((entry) => entry === relativePath || (entry.endsWith('/**') && relativePath.startsWith(entry.slice(0, -2))));
 }
