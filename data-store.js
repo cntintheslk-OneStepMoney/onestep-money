@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { localFinancialMonthKey } from './date-utils.js';
+import { normaliseAppearanceSettings, normaliseDashboardSettings } from './presentation-settings.js';
 import { knownPaydayDay, synchroniseReviewItems } from './review-lifecycle.js';
 
 const STATE_FILE = 'finance-state.json';
@@ -12,7 +13,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 const PORTABLE_BACKUP_FORMAT_VERSION = 2;
 const LOCAL_BACKUP_FORMAT_VERSION = 1;
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 const FRESH_START_CONFIRMATION_MS = 5 * 60 * 1000;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
@@ -1899,7 +1900,9 @@ const SETTING_NORMALISERS = Object.freeze({
   extraIncomeDebtPercent: (value) => finiteNumber(value, 80),
   llmModel: (value) => String(value || 'qwen2.5:1.5b').replace(/[\r\n]/g, '').slice(0, 120) || 'qwen2.5:1.5b',
   reminders: migrateReminders,
-  snoozedActions: migrateSnoozedActions
+  snoozedActions: migrateSnoozedActions,
+  appearance: normaliseAppearanceSettings,
+  dashboard: normaliseDashboardSettings
 });
 
 function migrateSettings(value) {
@@ -2064,7 +2067,8 @@ function validateMigratedState(state) {
   for (const collection of STATE_COLLECTIONS) {
     if (!Array.isArray(state[collection])) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
-  if (!isPlainObject(state.meta) || !isPlainObject(state.profile) || !isPlainObject(state.settings) || !isPlainObject(state.settings.reminders)) {
+  if (!isPlainObject(state.meta) || !isPlainObject(state.profile) || !isPlainObject(state.settings)
+    || !isPlainObject(state.settings.reminders) || !isPlainObject(state.settings.appearance) || !isPlainObject(state.settings.dashboard)) {
     throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
   if (!Number.isInteger(state.meta.revision) || state.meta.revision < 0 || !isPlainObject(state.settings.snoozedActions)) {

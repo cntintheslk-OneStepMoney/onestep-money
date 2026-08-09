@@ -51,7 +51,8 @@
           <div class="brand-copy"><strong><span>OneStep</span> <span>Money</span></strong><span>One clear move at a time.</span></div>
         </div>
         <nav aria-label="Main navigation">
-          <button class="nav-button active" type="button" data-view="today"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg><span class="nav-label">Today</span></button>
+          <button class="nav-button active" type="button" data-view="dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="10" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Dashboard</span></button>
+          <button class="nav-button" type="button" data-view="today"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg><span class="nav-label">Today</span></button>
           <button class="nav-button" type="button" data-view="review"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span class="nav-label">Review <span id="reviewNavCount" class="nav-count" aria-label="0 active review items" hidden>0</span></span></button>
           <button class="nav-button" type="button" data-view="transactions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4m-3.5 12.5L17 20l3.5-3.5"/></svg><span class="nav-label">Payments</span></button>
           <button class="nav-button" type="button" data-view="pay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 8.5a5.5 5.5 0 1 1 0 7"/><path d="M4 12h9M4 16h9"/></svg><span class="nav-label">Pay</span></button>
@@ -70,14 +71,69 @@
 
       <main class="main-content">
         <header class="topbar">
-          <div class="title-stack"><p class="eyebrow" id="viewEyebrow">ONE CLEAR MOVE</p><h1 id="viewTitle">Today</h1></div>
+          <div class="title-stack"><p class="eyebrow" id="viewEyebrow">YOUR MONEY AT A GLANCE</p><h1 id="viewTitle">Dashboard</h1></div>
           <div class="topbar-actions">
             <label class="compact-field">Period<select id="monthSelect" aria-label="Reporting period"></select></label>
             <div class="streak-chip" title="Weeks with a completed check-in"><span class="streak-icon" aria-hidden="true">◆</span><span><strong id="streakValue">0</strong> week streak</span></div>
           </div>
         </header>
 
-        <section id="view-today" class="view active" aria-labelledby="viewTitle">
+        <section id="view-dashboard" class="view active" aria-labelledby="viewTitle">
+          <div class="dashboard-toolbar">
+            <div class="segmented-control" role="group" aria-label="Dashboard detail">
+              <button id="dashboardSimpleButton" type="button" data-dashboard-mode="simple">Simple</button>
+              <button id="dashboardDetailedButton" type="button" data-dashboard-mode="detailed">Detailed</button>
+            </div>
+            <button id="customiseDashboardButton" class="secondary-button" type="button">Customise dashboard</button>
+          </div>
+          <p id="dashboardStatus" class="sr-only" role="status" aria-live="polite"></p>
+          <div id="dashboardModules" class="dashboard-grid">
+            <article class="dashboard-module dashboard-next-move" data-dashboard-module="next-move" aria-labelledby="dashboardNextMoveTitle">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">NEXT MOVE</p><h2 id="dashboardNextMoveTitle">Loading your next move…</h2></div><span id="dashboardNextMoveBand" class="next-move-band">Important</span></div>
+              <p id="dashboardNextMoveDetail" class="dashboard-lead"></p>
+              <div class="dashboard-module-footer"><span id="dashboardNextMoveTime" class="time-chip">10 min</span><button id="dashboardOpenNextMove" class="primary-button" type="button">Open Next Move</button></div>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="balance">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">MONEY POSITION</p><h2>Balance overview</h2></div></div>
+              <div class="dashboard-stat-pair"><div><span>Account balances</span><strong id="dashboardBalanceValue">£0.00</strong></div><div><span>Money available</span><strong id="dashboardAvailableValue">£0.00</strong></div></div>
+              <p id="dashboardCashFlowText" class="muted">No trusted cash-flow data yet.</p>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="upcoming">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">COMING UP</p><h2>Upcoming commitments</h2></div></div>
+              <strong id="dashboardUpcomingValue" class="dashboard-hero-value">£0.00</strong><p id="dashboardUpcomingText" class="muted">No upcoming commitments recorded.</p>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="budget">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">PLAN VERSUS ACTUAL</p><h2>Budget health</h2></div></div>
+              <strong id="dashboardBudgetValue" class="dashboard-hero-value">£0.00</strong><p id="dashboardBudgetText" class="muted"></p><div class="progress-track" aria-hidden="true"><span id="dashboardBudgetProgress"></span></div>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="alerts">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">IMPORTANT</p><h2>Warnings and checks</h2></div></div>
+              <div id="dashboardAlerts" class="dashboard-list"></div>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="progress">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">REAL PROGRESS</p><h2>Debt and savings progress</h2></div></div>
+              <div id="dashboardProgress" class="progress-list"></div><div id="dashboardWins" class="financial-wins"></div>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="spending">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">TRUSTED SPENDING</p><h2>Spending trend</h2></div><button class="text-button" type="button" data-view-target="transactions">Open Payments</button></div>
+              <div id="dashboardSpendingChart" class="chart chart-compact"></div><p id="dashboardSpendingSummary" class="chart-summary"></p>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="income">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">MONEY RECEIVED</p><h2>Income trend</h2></div></div>
+              <div id="dashboardIncomeChart" class="chart chart-compact"></div><p id="dashboardIncomeSummary" class="chart-summary"></p>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="review">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">UNRESOLVED WORK</p><h2>Review Inbox</h2></div></div>
+              <strong id="dashboardReviewValue" class="dashboard-hero-value">0</strong><p id="dashboardReviewText" class="muted">Nothing needs review.</p><button class="secondary-button" type="button" data-view-target="review">Open Review Inbox</button>
+            </article>
+            <article class="dashboard-module" data-dashboard-module="recent">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">LATEST ACTIVITY</p><h2>Recent trusted payments</h2></div><button class="text-button" type="button" data-view-target="transactions">View all</button></div>
+              <div id="dashboardRecentPayments" class="dashboard-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="view-today" class="view" hidden aria-labelledby="viewTitle">
           <article id="welcomeBackPanel" class="welcome-back" hidden><div><p class="eyebrow">WELCOME BACK</p><h2>Welcome back</h2><p id="welcomeBackText">A few things are worth checking.</p></div><button id="welcomeBackReviewButton" class="secondary-button" type="button">Open Review Inbox</button></article>
           <p id="todayProgressStatus" class="sr-only" role="status" aria-live="polite"></p>
           <article class="focus-panel" aria-labelledby="nextActionTitle">
@@ -121,6 +177,15 @@
             <div><h2>Payment ledger</h2><p>Incoming, outgoing and running balance. Confirmed transfers are excluded from real spending.</p></div>
             <div class="button-row"><label class="compact-field">Import to<select id="statementAccountSelect"></select></label><button id="importStatementButton" class="primary-button" type="button">Import statement</button><button class="secondary-button" type="button" data-add="transaction">Add payment</button><button id="exportCsvButton" class="secondary-button" type="button">Export CSV</button></div>
           </div>
+          <section class="payment-insights" aria-labelledby="paymentInsightsTitle">
+            <div class="section-heading"><div><p class="eyebrow">VISUAL SUMMARY</p><h2 id="paymentInsightsTitle">Understand this period</h2><p id="paymentInsightsSummary">Trusted financial activity only.</p></div></div>
+            <div class="payment-chart-grid">
+              <article class="chart-card"><h3>Money in vs money out</h3><div id="moneyInOutChart" class="chart"></div><p id="moneyInOutSummary" class="chart-summary"></p></article>
+              <article class="chart-card chart-card-wide"><h3>Spending over time</h3><div id="spendingTrendChart" class="chart"></div><p id="spendingTrendSummary" class="chart-summary"></p></article>
+              <article class="chart-card chart-card-wide"><div class="chart-card-heading"><h3>Spending by category</h3><button id="chartReviewUncategorisedButton" class="text-button" type="button" hidden>Review uncategorised</button></div><div id="categoryChart" class="category-chart"></div><p id="categoryChartSummary" class="chart-summary"></p></article>
+              <article class="chart-card"><h3>Committed vs flexible</h3><div id="recurringChart" class="chart"></div><p id="recurringChartSummary" class="chart-summary"></p></article>
+            </div>
+          </section>
           <div class="filter-bar">
             <label>Search<input id="transactionSearch" type="search" placeholder="Merchant, category or note" /></label>
             <label>Account<select id="transactionAccountFilter"><option value="all">All accounts</option></select></label>
@@ -174,6 +239,7 @@
           <div class="settings-grid">
             <article class="panel"><div class="panel-heading"><div><h2>Accounts</h2><p class="muted">Add an account before importing its statements.</p></div><button class="secondary-button" type="button" data-add="account">Add account</button></div><div id="accountCards" class="compact-card-list"></div></article>
             <article class="panel"><h2>Planning</h2><label>Dependable monthly income<input id="dependableIncomeInput" type="number" min="0" step="0.01" /></label><label>Payday day · optional<input id="paydayDayInput" type="number" min="1" max="31" step="1" placeholder="Leave blank if not known" /></label><p class="muted">Used only for “Snooze until payday”. Full payday automation remains a later feature.</p><label>Extra debt-payment target<input id="extraPaymentInput" type="number" min="0" step="10" /></label><label>Emergency-buffer target<input id="bufferTargetInput" type="number" min="0" step="50" /></label><label>Current emergency buffer<input id="bufferBalanceInput" type="number" min="0" step="1" /></label><button id="saveSettingsButton" class="primary-button" type="button">Save settings</button></article>
+            <article class="panel"><h2>Appearance</h2><label>Theme<select id="themeSelect"><option value="system">Follow system</option><option value="light">Light</option><option value="dark">Dark</option></select></label><p class="muted">System follows Windows appearance and updates while OneStep is open.</p><button id="openDashboardSettingsButton" class="secondary-button" type="button">Customise dashboard</button></article>
             <article class="panel"><h2>Local model</h2><label>Ollama model<input id="llmModelInput" type="text" value="qwen2.5:1.5b" /></label><p class="muted">Recommended small model: qwen2.5:1.5b. The app connects only to Ollama on 127.0.0.1.</p><button id="checkModelButton" class="secondary-button" type="button">Check model</button></article>
             <article class="panel"><h2>Encrypted backup</h2><p class="muted">A portable backup includes one verified snapshot of your financial data and encrypted document vault. Use a password you will remember.</p><label>Backup password<input id="backupPassphrase" type="password" minlength="8" autocomplete="new-password" /></label><div class="button-row"><button id="createBackupButton" class="primary-button" type="button">Create backup</button><button id="restoreBackupButton" class="secondary-button" type="button">Restore backup</button></div><p id="backupStatus" class="muted" aria-live="polite"></p></article>
             <article class="panel"><h2>Updates</h2><p id="updateStatus" class="muted" aria-live="polite">Updates are checked automatically. Downloads and installation only start when you choose.</p><progress id="settingsUpdateProgress" class="update-progress" max="100" value="0" aria-label="Update download 0% complete" hidden></progress><div class="update-action-grid"><button id="checkUpdateButton" class="secondary-button" type="button">Check for updates</button><button class="secondary-button" type="button" data-view-update hidden>View on GitHub</button><button class="primary-button update-primary-action" type="button" data-download-update hidden>Download update</button><button class="primary-button update-primary-action" type="button" data-restart-update hidden>Restart and install</button></div></article>
@@ -186,6 +252,8 @@
     </div>
 
     <dialog id="editDialog" class="modal" aria-labelledby="editTitle"><form id="editForm" method="dialog"><div class="modal-heading"><div><p class="eyebrow" id="editEyebrow">EDIT</p><h2 id="editTitle">Edit item</h2></div><button class="icon-button" type="submit" value="cancel" aria-label="Close">×</button></div><div id="editFields" class="form-grid"></div><div class="modal-actions"><button type="submit" value="cancel" class="secondary-button">Cancel</button><button id="saveEditButton" type="button" class="primary-button">Save</button></div></form></dialog>
+
+    <dialog id="dashboardDialog" class="modal" aria-labelledby="dashboardDialogTitle"><form method="dialog"><div class="modal-heading"><div><p class="eyebrow">PERSONALISE</p><h2 id="dashboardDialogTitle">Customise dashboard</h2></div><button class="icon-button" type="submit" value="cancel" aria-label="Close">×</button></div><p class="muted">Choose what you see. The supported default remains ready whenever you reset.</p><div id="dashboardCustomisationList" class="dashboard-customisation-list"></div><div class="modal-actions split-actions"><button id="resetDashboardButton" type="button" class="danger-button">Reset dashboard</button><button type="submit" value="done" class="primary-button">Done</button></div></form></dialog>
 
     <dialog id="importDialog" class="modal wide" aria-labelledby="importTitle"><form method="dialog"><div class="modal-heading"><div><p class="eyebrow">IMPORT PREVIEW</p><h2 id="importTitle">Review before importing</h2></div><button class="icon-button" type="submit" value="cancel" aria-label="Close">×</button></div><div id="importSummary" class="import-summary"></div><div id="importChanges" class="import-changes" hidden></div><div id="importWarnings" class="warning-box" hidden></div><div class="table-wrap preview-table"><table><thead id="importPreviewHead"></thead><tbody id="importPreviewRows"></tbody></table></div><div class="modal-actions"><button type="submit" value="cancel" class="secondary-button">Keep document only</button><button id="confirmImportButton" type="button" class="primary-button">Import reviewed records</button></div></form></dialog>
 
