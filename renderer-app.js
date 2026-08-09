@@ -1,8 +1,8 @@
 import {
   ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
-  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, removeBudgetCategory, reportingPeriodMonthCount,
-  resolvePossibleDuplicate
+  findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, INCOME_PAYMENT_CATEGORY, isIncomePayment,
+  removeBudgetCategory, reportingPeriodMonthCount, resolvePossibleDuplicate
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
@@ -27,6 +27,7 @@ let updateUiState = createUpdateUiState();
 let normalEventsBound = false;
 let recoveryEventsBound = false;
 let restoreEventsBound = false;
+const INCOME_PAYMENT_CATEGORY_VALUE = 'payment-category:income';
 
 const viewMeta = {
   today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
@@ -79,7 +80,7 @@ function activateNormalMode(loaded) {
   }
   populateMonthOptions();
   populateAccountOptions();
-  populateBudgetCategoryOptions();
+  populatePaymentCategoryOptions();
   render();
   checkModel();
 }
@@ -345,7 +346,7 @@ function selectView(name) {
 
 function render() {
   populateMonthOptions();
-  populateBudgetCategoryOptions();
+  populatePaymentCategoryOptions();
   const month = state.settings.selectedMonth;
   const summary = calculatePeriodSummary(state, month);
   pendingAction = buildNextAction(state);
@@ -430,7 +431,10 @@ function renderTransactions() {
     .filter((item) => state.settings.selectedMonth === ALL_TIME_PERIOD || String(item.budgetMonth || item.date).startsWith(state.settings.selectedMonth))
     .filter((item) => account === 'all' || item.accountId === account)
     .filter((item) => type === 'all' || (type === 'incoming' && item.incoming > 0) || (type === 'outgoing' && item.outgoing > 0) || (type === 'transfer' && item.transferStatus !== 'no'))
-    .filter((item) => category === 'all' || (category === 'uncategorised' ? uncategorised.has(item.id) : budgetByTransaction.get(item.id)?.id === category))
+    .filter((item) => category === 'all'
+      || (category === 'uncategorised' ? uncategorised.has(item.id)
+        : category === INCOME_PAYMENT_CATEGORY_VALUE ? isIncomePayment(item)
+          : budgetByTransaction.get(item.id)?.id === category))
     .filter((item) => !search || [item.description, item.userDescription, budgetByTransaction.get(item.id)?.category, item.category, item.notes].join(' ').toLowerCase().includes(search))
     .sort((left, right) => left.date.localeCompare(right.date) || Number(left.sourceRow || 0) - Number(right.sourceRow || 0));
   const body = byId('transactionRows');
@@ -445,7 +449,8 @@ function renderTransactions() {
     if (item.userDescription) description.append(element('span', '', item.description));
     const badges = document.createElement('span');
     badges.className = 'note-preview';
-    badges.textContent = budgetByTransaction.get(item.id)?.category || (uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
+    badges.textContent = isIncomePayment(item) ? INCOME_PAYMENT_CATEGORY
+      : budgetByTransaction.get(item.id)?.category || (uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
     if (item.transferStatus !== 'no') badges.textContent += ` · ${item.transferStatus} transfer`;
     if (item.duplicateStatus === 'possible') {
       const duplicateLabel = item.reviewStatus === 'accepted' ? 'accepted possible duplicate'
@@ -582,7 +587,7 @@ function renderBudget() {
   byId('uncategorisedBudgetValue').textContent = formatCurrency(analysis.uncategorisedActual);
   byId('uncategorisedBudgetNotice').hidden = analysis.uncategorisedActual <= 0;
   const list = byId('budgetRows'); clear(list);
-  if (!state.budgets.length) {
+  if (!analysis.rows.length) {
     const empty = element('div', 'empty-inline', 'No budget items yet. Add essentials first, then minimum debt payments.');
     list.append(empty);
   }
@@ -1007,8 +1012,8 @@ function openEditor(type, id = '') {
   editorContext = { type, id };
   const collection = collectionFor(type);
   const item = id ? state[collection].find((entry) => entry.id === id) : null;
-  const editorItem = type === 'transaction' && item && !item.budgetCategoryId && item.categorySource !== 'manual'
-    ? { ...item, budgetCategoryId: legacyBudgetIdForTransaction(item) }
+  const editorItem = type === 'transaction' && item
+    ? transactionEditorItem(item)
     : item;
   byId('editEyebrow').textContent = item ? 'EDIT' : 'ADD';
   byId('editTitle').textContent = `${item ? 'Edit' : 'Add'} ${type === 'account' ? 'bank account' : type}`;
@@ -1032,7 +1037,10 @@ function editorDefinitions(type) {
     ['accountId', 'Account', 'select', state.accounts.map((account) => [account.id, account.name])], ['date', 'Date', 'date'],
     ['description', 'Statement / payment description', 'text', 'Required', 'wide-field'], ['userDescription', 'Your description', 'text', 'Optional clearer name', 'wide-field'],
     ['incoming', 'Incoming', 'number'], ['outgoing', 'Outgoing', 'number'], ['runningBalance', 'Running balance', 'number'],
-    ['budgetCategoryId', 'Budget category', 'select', [['','Uncategorised'], ...state.budgets.map((budget) => [budget.id, budget.category])]],
+    ['budgetCategoryId', 'Payment category', 'select', [
+      ['','Uncategorised'], [INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY],
+      ...state.budgets.filter((budget) => !isIncomePayment({ category: budget.category })).map((budget) => [budget.id, budget.category])
+    ]],
     ['category', 'Statement category label', 'text'],
     ['budgetTreatment', 'Budget treatment', 'select', [['auto','Automatic'],['spending','Spending'],['refund','Refund'],['reversal','Reversal'],['transfer','Internal transfer'],['savings_transfer','Savings transfer'],['debt_payment','Debt payment'],['ignored','Do not include']]],
     ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']]], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
@@ -1073,6 +1081,7 @@ async function saveEditor(event) {
   const { type, id } = editorContext;
   const collection = collectionFor(type);
   let item = id ? state[collection].find((entry) => entry.id === id) : null;
+  const wasIncomePayment = type === 'transaction' && isIncomePayment(item);
   const previousBudgetCategory = type === 'budget' ? item?.category : '';
   if (!item) { item = { id: createId(type) }; state[collection].push(item); }
   for (const definition of editorDefinitions(type)) {
@@ -1086,8 +1095,14 @@ async function saveEditor(event) {
     item.budgetMonth = item.date?.slice(0, 7) || state.settings.selectedMonth;
     item.source ||= 'manual'; item.cleared ??= true; item.incoming = Number(item.incoming || 0); item.outgoing = Number(item.outgoing || 0);
     item.categorySource = 'manual';
-    const budget = state.budgets.find((entry) => entry.id === item.budgetCategoryId);
-    if (budget) item.category = budget.category;
+    if (item.budgetCategoryId === INCOME_PAYMENT_CATEGORY_VALUE) {
+      item.budgetCategoryId = '';
+      item.category = INCOME_PAYMENT_CATEGORY;
+    } else {
+      const budget = state.budgets.find((entry) => entry.id === item.budgetCategoryId);
+      if (budget) item.category = budget.category;
+      else if (wasIncomePayment && isIncomePayment(item)) item.category = '';
+    }
   }
   if (type === 'budget' && previousBudgetCategory && previousBudgetCategory !== item.category) {
     for (const transaction of state.transactions) {
@@ -1098,7 +1113,7 @@ async function saveEditor(event) {
   if (type === 'account') { item.name ||= 'Unnamed account'; item.active ??= true; }
   await saveState();
   if (type === 'account') populateAccountOptions();
-  if (type === 'budget') populateBudgetCategoryOptions();
+  if (type === 'budget') populatePaymentCategoryOptions();
   if (type === 'transaction' || type === 'payslip') populateMonthOptions();
   byId('editDialog').close(); editorContext = null; render(); showToast('Saved.');
 }
@@ -1116,7 +1131,7 @@ async function deleteEditedItem(type, id) {
   const collection = collectionFor(type); state[collection] = state[collection].filter((item) => item.id !== id);
   await saveState();
   if (type === 'account') populateAccountOptions();
-  if (type === 'budget') populateBudgetCategoryOptions();
+  if (type === 'budget') populatePaymentCategoryOptions();
   byId('editDialog').close(); editorContext = null; render(); showToast('Deleted.');
 }
 
@@ -1132,7 +1147,7 @@ async function removeBudgetItem(id, closeEditor = false) {
     : '';
   if (!window.confirm(`Remove ${budget.category} from your budget?${linkedMessage}`)) return;
   await saveState(removeBudgetCategory(state, id));
-  populateBudgetCategoryOptions();
+  populatePaymentCategoryOptions();
   if (closeEditor && byId('editDialog').open) byId('editDialog').close();
   editorContext = closeEditor ? null : editorContext;
   render();
@@ -1495,15 +1510,26 @@ function populateAccountOptions() {
   }
 }
 
-function populateBudgetCategoryOptions() {
+function populatePaymentCategoryOptions() {
   const select = byId('transactionCategoryFilter');
   if (!select) return;
   const selected = select.value || 'all';
   clear(select);
-  for (const [value, label] of [['all', 'All categories'], ['uncategorised', 'Uncategorised'], ...state.budgets.map((budget) => [budget.id, budget.category])]) {
+  for (const [value, label] of [
+    ['all', 'All categories'], ['uncategorised', 'Uncategorised'], [INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY],
+    ...state.budgets.filter((budget) => !isIncomePayment({ category: budget.category })).map((budget) => [budget.id, budget.category])
+  ]) {
     const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option);
   }
   select.value = [...select.options].some((option) => option.value === selected) ? selected : 'all';
+}
+
+function transactionEditorItem(transaction) {
+  if (isIncomePayment(transaction)) return { ...transaction, budgetCategoryId: INCOME_PAYMENT_CATEGORY_VALUE };
+  if (!transaction.budgetCategoryId && transaction.categorySource !== 'manual') {
+    return { ...transaction, budgetCategoryId: legacyBudgetIdForTransaction(transaction) };
+  }
+  return transaction;
 }
 
 function legacyBudgetIdForTransaction(transaction) {

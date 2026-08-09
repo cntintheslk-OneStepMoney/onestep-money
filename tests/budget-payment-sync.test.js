@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   calculateBudgetAnalysis, calculateBudgetRows, calculatePeriodSummary, findSavingsOpportunities,
-  isTransactionFinanciallyActive, removeBudgetCategory, resolvePossibleDuplicate
+  INCOME_PAYMENT_CATEGORY, isIncomePayment, isTransactionFinanciallyActive, removeBudgetCategory, resolvePossibleDuplicate
 } from '../finance-core.js';
 import { financialSnapshot } from '../local-llm-service.js';
 
@@ -88,6 +88,92 @@ test('confirmed internal transfers and explicit savings transfers do not count a
   const analysis = calculateBudgetAnalysis(input);
   assert.equal(analysis.actual, 0);
   assert.equal(analysis.uncategorisedActual, 0);
+});
+
+test('Income is a recognised payment category that remains in cashflow but never becomes budget expenditure', () => {
+  const income = {
+    id: 'salary', date: '2026-08-01', budgetMonth: '2026-08', incoming: 2100, outgoing: 0,
+    transferStatus: 'no', description: 'Fictional salary', category: INCOME_PAYMENT_CATEGORY,
+    budgetCategoryId: 'groceries', categorySource: 'manual'
+  };
+  const input = state({
+    budgets: [
+      { id: 'groceries', category: 'Groceries', planned: 300 },
+      { id: 'income-budget', category: 'Income', planned: 2100 }
+    ],
+    transactions: [income, outgoing('food', 200, { category: 'Groceries' })]
+  });
+
+  const analysis = calculateBudgetAnalysis(input);
+  const summary = calculatePeriodSummary(input);
+
+  assert.equal(isIncomePayment(income), true);
+  assert.deepEqual(analysis.rows.map((row) => row.id), ['groceries']);
+  assert.equal(analysis.rows[0].actual, 200);
+  assert.equal(analysis.rows[0].remaining, 100);
+  assert.equal(analysis.rows[0].progressPercent, 67);
+  assert.equal(analysis.actual, 200);
+  assert.equal(analysis.uncategorisedActual, 0);
+  assert.deepEqual(analysis.uncategorisedTransactionIds, []);
+  assert.equal(summary.income, 2100);
+  assert.equal(summary.spending, 200);
+  assert.equal(summary.netCashFlow, 1900);
+});
+
+test('Income exclusion is category-based even when an Income payment has an outgoing value', () => {
+  const analysis = calculateBudgetAnalysis(state({ transactions: [
+    outgoing('income-correction', 75, {
+      category: ' income ', budgetCategoryId: 'groceries', categorySource: 'manual'
+    })
+  ] }));
+
+  assert.equal(analysis.rows[0].actual, 0);
+  assert.equal(analysis.actual, 0);
+  assert.equal(analysis.uncategorisedActual, 0);
+  assert.equal(analysis.coveragePercent, 100);
+  assert.deepEqual(analysis.uncategorisedTransactionIds, []);
+});
+
+test('Income stays excluded from six-month plan-versus-actual calculations', () => {
+  const transactions = [];
+  for (let month = 3; month <= 8; month += 1) {
+    const period = `2026-${String(month).padStart(2, '0')}`;
+    transactions.push({
+      id: `salary-${period}`, date: `${period}-01`, budgetMonth: period, incoming: 2100, outgoing: 0,
+      transferStatus: 'no', description: 'Fictional salary', category: INCOME_PAYMENT_CATEGORY
+    });
+    transactions.push(outgoing(`food-${period}`, 270, {
+      date: `${period}-08`, budgetMonth: period, category: 'Groceries'
+    }));
+  }
+  const input = state({ settings: { selectedMonth: 'all' }, budgets: [{ id: 'groceries', category: 'Groceries', planned: 300 }], transactions });
+
+  const analysis = calculateBudgetAnalysis(input);
+  const summary = calculatePeriodSummary(input);
+
+  assert.equal(analysis.monthCount, 6);
+  assert.equal(analysis.rows[0].planned, 1800);
+  assert.equal(analysis.rows[0].actual, 1620);
+  assert.equal(analysis.rows[0].remaining, 180);
+  assert.equal(analysis.rows[0].progressPercent, 90);
+  assert.equal(analysis.actual, 1620);
+  assert.equal(summary.income, 12600);
+  assert.equal(summary.spending, 1620);
+  assert.equal(summary.netCashFlow, 10980);
+});
+
+test('positive payments are not automatically rewritten as Income', () => {
+  const payment = {
+    id: 'refund-or-reimbursement', date: '2026-08-12', budgetMonth: '2026-08', incoming: 50, outgoing: 0,
+    transferStatus: 'no', description: 'Fictional positive payment', category: ''
+  };
+  const input = state({ transactions: [payment] });
+
+  calculateBudgetAnalysis(input);
+  calculatePeriodSummary(input);
+
+  assert.equal(payment.category, '');
+  assert.equal(isIncomePayment(payment), false);
 });
 
 test('debt repayments are excluded unless assigned to an explicit commitment budget', () => {
@@ -255,6 +341,17 @@ test('budget rows expose clear accessible edit and remove controls', () => {
   assert.match(renderer, /Remove \$\{item\.category\} from budget/);
   assert.match(styles, /\.budget-item-actions\s*\{[^}]*display: flex/);
   assert.match(styles, /\.budget-remove-button\s*\{/);
+});
+
+test('payment editing and filtering expose Income as a standard category', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+
+  assert.match(html, /<label>Payment category<select id="transactionCategoryFilter">/);
+  assert.match(renderer, /\['','Uncategorised'\], \[INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY\]/);
+  assert.match(renderer, /item\.category = INCOME_PAYMENT_CATEGORY/);
+  assert.match(renderer, /category === INCOME_PAYMENT_CATEGORY_VALUE \? isIncomePayment\(item\)/);
+  assert.match(renderer, /isIncomePayment\(item\) \? INCOME_PAYMENT_CATEGORY/);
 });
 
 test('edited amount, date and planned amount are derived without cached actuals', () => {
