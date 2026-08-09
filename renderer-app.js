@@ -6,6 +6,7 @@ import {
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
+import { buildPayslipRecord, payslipEditorItem } from './payslip-record.js';
 import {
   applyUpdateStatus, createUpdateUiState, dismissUpdateNotification as dismissUpdateUiNotification,
   setInstalledVersion, updateUiView
@@ -488,7 +489,7 @@ function renderPay() {
     const summary = element('div', 'payslip-summary');
     const title = element('div', 'entity-title');
     append(title, element('h3', '', monthLabel(payslip.period)), element('p', '', `${payslip.source} · Paid ${formatDate(payslip.payDate)}`));
-    append(summary, title, stat('Gross', formatCurrency(payslip.grossPay)), stat('Deductions', formatCurrency(payslip.totalDeductions)), stat('Net', formatCurrency(payslip.netPay)), actionButton('payslip', payslip.id, 'Notes'));
+    append(summary, title, stat('Gross', formatCurrency(payslip.grossPay)), stat('Deductions', formatCurrency(payslip.totalDeductions)), stat('Net', formatCurrency(payslip.netPay)), actionButton('payslip', payslip.id, 'Edit'));
     const details = element('details');
     const detailsSummary = element('summary', '', 'Show earnings and deductions');
     const detailGrid = element('div', 'payslip-details');
@@ -1014,7 +1015,9 @@ function openEditor(type, id = '') {
   const item = id ? state[collection].find((entry) => entry.id === id) : null;
   const editorItem = type === 'transaction' && item
     ? transactionEditorItem(item)
-    : item;
+    : type === 'payslip'
+      ? payslipEditorItem(item || { period: state.settings.selectedMonth === ALL_TIME_PERIOD ? new Date().toISOString().slice(0, 7) : state.settings.selectedMonth })
+      : item;
   byId('editEyebrow').textContent = item ? 'EDIT' : 'ADD';
   byId('editTitle').textContent = `${item ? 'Edit' : 'Add'} ${type === 'account' ? 'bank account' : type}`;
   const fields = byId('editFields'); clear(fields);
@@ -1045,7 +1048,20 @@ function editorDefinitions(type) {
     ['budgetTreatment', 'Budget treatment', 'select', [['auto','Automatic'],['spending','Spending'],['refund','Refund'],['reversal','Reversal'],['transfer','Internal transfer'],['savings_transfer','Savings transfer'],['debt_payment','Debt payment'],['ignored','Do not include']]],
     ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']]], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
-  if (type === 'payslip') return [['notes', 'Notes', 'textarea', '', 'wide-field']];
+  if (type === 'payslip') return [
+    ['period', 'Pay month', 'month'], ['payDate', 'Pay date', 'date'],
+    ['grossPay', 'Gross pay', 'number'], ['netPay', 'Net pay', 'number'],
+    ['taxablePay', 'Taxable pay', 'number'], ['niablePay', 'NI-able pay', 'number'],
+    ['annualSalary', 'Annual salary', 'number'], ['taxCode', 'Tax code', 'text'],
+    ['taxBasis', 'Tax basis', 'text'], ['niCategory', 'NI category', 'text'],
+    ['employerPayeReference', 'Employer PAYE reference', 'text'],
+    ['earningsText', 'Payments and allowances - one per line as Description | 0.00', 'textarea', 'Basic pay | 2500.00', 'wide-field'],
+    ['deductionsText', 'Deductions - one per line as Description | 0.00 (total calculated automatically)', 'textarea', 'PAYE | 350.00', 'wide-field'],
+    ['grossPayYtd', 'Gross pay YTD', 'number'], ['taxablePayYtd', 'Taxable pay YTD', 'number'],
+    ['niablePayYtd', 'NI-able pay YTD', 'number'], ['payeYtd', 'PAYE YTD', 'number'],
+    ['niEmployeeYtd', 'Employee NI YTD', 'number'], ['niEmployerYtd', 'Employer NI YTD', 'number'],
+    ['notes', 'Notes', 'textarea', '', 'wide-field']
+  ];
   if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']]], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
   const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual / minimum payment','number'], ['arrearsAmount','Known arrears amount','number'], ['status','Status','select',[['unknown','Unknown'],['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['arrangementStatus','Payment arrangement','select',[['unknown','Unknown'],['none','Confirmed none'],['confirmed','Confirmed arrangement']]], ['arrangementPayment','Agreed arrangement payment','number'], ['includeInPlan','Include in payoff plan','checkbox'], ['statusConflict','Status information conflicts / needs checking','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
   if (type === 'overdraft') {
@@ -1081,6 +1097,25 @@ async function saveEditor(event) {
   const { type, id } = editorContext;
   const collection = collectionFor(type);
   let item = id ? state[collection].find((entry) => entry.id === id) : null;
+  if (type === 'payslip') {
+    const values = {};
+    for (const definition of editorDefinitions(type)) {
+      const [name, , fieldType] = definition;
+      const input = byId('editFields').querySelector(`[name="${name}"]`);
+      values[name] = fieldType === 'number' && input.value.trim() !== '' ? Number(input.value) : input.value.trim();
+    }
+    const result = buildPayslipRecord(values, item || { id: createId('payslip'), provider: 'manual', source: 'Manual entry' });
+    if (!result.valid) {
+      window.alert(`This pay record cannot be saved yet:\n\n${result.errors.join('\n')}`);
+      return;
+    }
+    if (item) Object.assign(item, result.record);
+    else state.payslips.push(result.record);
+    await saveState();
+    populateMonthOptions();
+    byId('editDialog').close(); editorContext = null; render(); showToast('Pay record saved.');
+    return;
+  }
   const wasIncomePayment = type === 'transaction' && isIncomePayment(item);
   const previousBudgetCategory = type === 'budget' ? item?.category : '';
   if (!item) { item = { id: createId(type) }; state[collection].push(item); }

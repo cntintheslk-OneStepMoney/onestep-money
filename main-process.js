@@ -485,7 +485,7 @@ function canonicalDocumentName(document, preview, accountId, state) {
       : preview.summary?.statementEndDate || [...(preview.records || [])].map((item) => item.date).filter(Boolean).sort().at(-1) || new Date().toISOString().slice(0, 10);
   const type = preview.kind === 'payslip' ? 'payslip' : preview.kind === 'credit-report' ? 'credit-report' : 'bank-statement';
   const provider = preview.kind === 'payslip'
-    ? 'jpa'
+    ? slugName(record?.provider || 'jpa')
     : preview.kind === 'credit-report'
       ? slugName(record?.provider || 'unknown-provider')
       : slugName(state.accounts.find((account) => account.id === accountId)?.institution || 'unassigned');

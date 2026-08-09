@@ -51,6 +51,7 @@
       "local-llm-service.js",
       "main-process.js",
       "pdf-service.js",
+      "payslip-record.js",
       "preload-bridge.cjs",
       "renderer-app.js",
       "credit-report-intelligence.js",
