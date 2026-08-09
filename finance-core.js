@@ -467,18 +467,27 @@ export function findDuplicateCandidates(existing, incoming) {
   const exact = [];
   const possible = [];
   const usedExisting = new Set();
+  const providerIndex = new Map();
+  const identityIndex = new Map();
+  const possibleIndex = new Map();
+  for (const item of existing || []) {
+    const providerId = String(item.providerTransactionId || '').trim();
+    if (providerId) addToIndex(providerIndex, `${item.accountId}|${providerId}`, item);
+    addToIndex(identityIndex, exactTransactionKey(item), item);
+    addToIndex(possibleIndex, possibleTransactionKey(item), item);
+  }
   for (const item of incoming || []) {
     const providerId = String(item.providerTransactionId || '').trim();
-    const providerMatch = providerId && (existing || []).find((other) => !usedExisting.has(other.id)
-      && other.accountId === item.accountId && String(other.providerTransactionId || '').trim() === providerId);
-    const identityMatch = providerMatch || (existing || []).find((other) => !usedExisting.has(other.id)
-      && exactTransactionKey(other) === exactTransactionKey(item) && compatibleRunningBalance(other, item));
+    const providerMatch = providerId
+      ? firstUnused(providerIndex.get(`${item.accountId}|${providerId}`), usedExisting)
+      : null;
+    const identityMatch = providerMatch || firstUnused(identityIndex.get(exactTransactionKey(item)), usedExisting, (other) => compatibleRunningBalance(other, item));
     if (identityMatch) {
       usedExisting.add(identityMatch.id);
       exact.push({ incoming: item, existing: identityMatch, evidence: providerMatch ? 'provider-id' : 'transaction-identity' });
       continue;
     }
-    const candidate = (existing || []).find((other) => possibleTransactionMatch(other, item));
+    const candidate = possibleIndex.get(possibleTransactionKey(item))?.[0];
     if (candidate) possible.push({ incoming: item, existing: candidate });
   }
   return { exact, possible };
@@ -850,10 +859,18 @@ function exactTransactionKey(item) {
   return [item.accountId, item.date, roundMoney(item.incoming), roundMoney(item.outgoing), normalise(item.description), normalise(item.reference)].join('|');
 }
 
-function possibleTransactionMatch(left, right) {
-  return left.accountId === right.accountId && left.date === right.date
-    && roundMoney(left.incoming) === roundMoney(right.incoming)
-    && roundMoney(left.outgoing) === roundMoney(right.outgoing);
+function possibleTransactionKey(item) {
+  return [item.accountId, item.date, roundMoney(item.incoming), roundMoney(item.outgoing)].join('|');
+}
+
+function addToIndex(index, key, item) {
+  const values = index.get(key) || [];
+  values.push(item);
+  index.set(key, values);
+}
+
+function firstUnused(items = [], usedIds, predicate = () => true) {
+  return items.find((item) => !usedIds.has(item.id) && predicate(item)) || null;
 }
 
 function compatibleRunningBalance(left, right) {

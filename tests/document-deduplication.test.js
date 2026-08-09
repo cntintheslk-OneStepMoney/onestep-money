@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import test from 'node:test';
-import { DocumentImportCoordinator, IMPORT_OUTCOMES } from '../document-deduplication.js';
+import { classifyImportCompatibility, DocumentImportCoordinator, IMPORT_OUTCOMES } from '../document-deduplication.js';
 
 const baseState = () => ({
   accounts: [], transactions: [], payslips: [], creditReports: [], debts: [], overdrafts: [], documents: [], importBatches: []
@@ -15,6 +15,16 @@ test('duplicate outcomes use a calm dedicated result dialog with no override', (
   assert.match(markup, /Already imported/);
   assert.match(renderer, /OneStep recognised this document from its contents/);
   assert.doesNotMatch(`${markup}\n${renderer}`, /Import anyway/i);
+});
+
+test('import compatibility failures become privacy-safe diagnostic classifications', () => {
+  assert.deepEqual(classifyImportCompatibility({
+    records: [], rejected: [{ reason: 'Required labelled total is missing from this unsupported layout.' }],
+    warnings: [], summary: { provider: 'mynavy' }, reconciled: false
+  }), {
+    providerFamily: 'mynavy', recognitionStage: 'layout_detection', failureCategory: 'unsupported_layout', reconciliationOutcome: 'failed'
+  });
+  assert.equal(classifyImportCompatibility({ records: [], rejected: [], warnings: [], summary: { provider: 'Private Bank Name' } }).providerFamily, 'unknown');
 });
 
 test('a first payslip is stored, parsed and offered for review exactly once', async () => {

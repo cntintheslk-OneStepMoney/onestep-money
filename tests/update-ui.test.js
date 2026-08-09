@@ -92,7 +92,7 @@ test('settings update actions use stable equal-height two-row grid markup in eve
   const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
 
   assert.match(html, /class="update-action-grid"/);
-  assert.match(html, /id="checkUpdateButton"[\s\S]+data-view-update[\s\S]+class="primary-button update-primary-action" data-download-update/);
+  assert.match(html, /id="checkUpdateButton"[\s\S]+data-view-update[\s\S]+class="primary-button update-primary-action"[^>]+data-download-update/);
   assert.match(css, /\.update-action-grid \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css, /\.update-action-grid > button \{[^}]*height: 44px;[^}]*min-height: 44px/);
   assert.match(css, /\.update-action-grid \.update-primary-action \{ grid-column: 1 \/ -1; \}/);
