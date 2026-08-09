@@ -2,7 +2,7 @@ import { localFinancialMonthKey } from './date-utils.js';
 import { synchroniseReviewItems } from './review-lifecycle.js';
 import { prioritySnapshot } from './next-move-priority.js';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 export const ALL_TIME_PERIOD = 'all';
 export const INCOME_PAYMENT_CATEGORY = 'Income';
 
@@ -937,7 +937,7 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function isExternalCashflowTransaction(transaction) {
+export function isExternalCashflowTransaction(transaction) {
   const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
   return transaction.transferStatus !== 'confirmed'
     && !['transfer', 'savings_transfer', 'ignored'].includes(treatment);
