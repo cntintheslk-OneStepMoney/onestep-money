@@ -2,6 +2,7 @@ import { localFinancialMonthKey } from './date-utils.js';
 
 export const SCHEMA_VERSION = 7;
 export const ALL_TIME_PERIOD = 'all';
+export const INCOME_PAYMENT_CATEGORY = 'Income';
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -87,7 +88,7 @@ export function removeBudgetCategory(state, budgetId) {
 }
 
 export function calculateBudgetAnalysis(state, month = state.settings?.selectedMonth) {
-  const budgets = state.budgets || [];
+  const budgets = (state.budgets || []).filter((budget) => !isIncomeCategory(budget.category));
   const monthCount = reportingPeriodMonthCount(state, month);
   const transactions = periodTransactions(state.transactions, month);
   const budgetsById = new Map(budgets.map((budget) => [String(budget.id), budget]));
@@ -139,6 +140,7 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   for (const transaction of transactions) {
     const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
     if (transaction.transferStatus === 'confirmed' || ['transfer', 'savings_transfer', 'ignored'].includes(treatment)) continue;
+    if (isIncomePayment(transaction)) continue;
 
     const outgoingPennies = Math.max(0, moneyToPennies(transaction.outgoing));
     const incomingPennies = Math.max(0, moneyToPennies(transaction.incoming));
@@ -196,6 +198,10 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
     coveragePercent: eligibleGrossPennies > 0 ? Math.round((categorisedGrossPennies / eligibleGrossPennies) * 100) : 100,
     uncategorisedTransactionIds
   };
+}
+
+export function isIncomePayment(transaction = {}) {
+  return isIncomeCategory(transaction.category);
 }
 
 export function reportingPeriodMonthCount(state, month = state.settings?.selectedMonth) {
@@ -947,6 +953,10 @@ function penniesToMoney(value) {
 
 function normalise(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isIncomeCategory(value) {
+  return normalise(value) === normalise(INCOME_PAYMENT_CATEGORY);
 }
 
 function sum(rows = [], field) {
