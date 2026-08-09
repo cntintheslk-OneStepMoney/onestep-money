@@ -1,6 +1,6 @@
 import {
-  ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, buildNextAction, calculateBudgetAnalysis,
-  calculatePeriodSummary, calculateStreak, createId, debtPlan, exportTransactionsCsv,
+  ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, calculateBudgetAnalysis,
+  calculatePeriodSummary, calculateStreak, createId, debtPlan, debtSafetyAssessment, exportTransactionsCsv,
   findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, INCOME_PAYMENT_CATEGORY, isIncomePayment,
   removeBudgetCategory, reportingPeriodMonthCount, resolvePossibleDuplicate
 } from './finance-core.js';
@@ -17,12 +17,17 @@ import {
 } from './transaction-ledger.js';
 import {
   knownPaydayDay, resolveReviewItem, reviewInboxSummary, reviewItemPresentation, reviewRoute,
-  selectCheckInReviewItems, snoozeReviewGroup, snoozeReviewItem, startReviewItem, synchroniseReviewItems
+  snoozeReviewGroup, snoozeReviewItem, startReviewItem, synchroniseReviewItems
 } from './review-lifecycle.js';
+import {
+  PRIORITY_DIAGNOSTIC_CODES, prioritisedReviewGroups, prioritySnapshot, selectFiveMinuteCheckIn
+} from './next-move-priority.js';
 
 let state;
 let encryption;
 let pendingAction;
+let priorityView;
+let prioritySafety;
 let importQueue = [];
 let currentImport = null;
 let editorContext = null;
@@ -334,6 +339,7 @@ function bindEvents() {
   byId('reviewActiveList').addEventListener('click', handleReviewAction);
   byId('reviewSnoozedList').addEventListener('click', handleReviewAction);
   byId('checkInReviewList').addEventListener('click', handleReviewAction);
+  byId('todaySupportingList').addEventListener('click', handleReviewAction);
   byId('payslipList').addEventListener('click', handleEditClick);
   byId('documentCards').addEventListener('click', handleDocumentClick);
   byId('accountCards').addEventListener('click', handleEditClick);
@@ -386,14 +392,42 @@ function render() {
   populatePaymentCategoryOptions();
   const month = state.settings.selectedMonth;
   const summary = calculatePeriodSummary(state, month);
-  pendingAction = buildNextAction(state);
+  try {
+    prioritySafety = debtSafetyAssessment(state);
+    priorityView = prioritySnapshot(state, new Date(), { preferredItemId: pendingAction?.reviewId, safetyAssessment: prioritySafety });
+  } catch {
+    prioritySafety = null;
+    priorityView = unavailablePriorityView();
+    recordPriorityDiagnostic(PRIORITY_DIAGNOSTIC_CODES.EVALUATION_FAILED);
+  }
+  pendingAction = priorityView.unavailable ? {
+    title: 'Next Move is temporarily unavailable',
+    detail: 'OneStep could not calculate a safe ordering. Your unresolved work is still available in Review Inbox.',
+    priorityReason: 'The priority calculation failed without changing any financial data. Use Review Inbox until it can be recalculated.',
+    timeframe: 'Unavailable', passive: true, unavailable: true
+  } : priorityView.nextMove ? {
+    ...priorityView.nextMove,
+    reviewId: priorityView.nextMove.item.id,
+    completeDirect: priorityView.nextMove.item.type === 'generated_action'
+      && reviewRoute(priorityView.nextMove.item, state).view === 'today'
+  } : {
+    title: 'You’re caught up for now',
+    detail: priorityView.lowPriorityRemaining
+      ? `${priorityView.lowPriorityRemaining} lower-priority ${priorityView.lowPriorityRemaining === 1 ? 'item remains' : 'items remain'} available in Review Inbox, but nothing needs to take over Today.`
+      : 'There is no unresolved work worth putting in front of you right now.',
+    timeframe: 'Done', passive: true
+  };
   byId('nextActionTitle').textContent = pendingAction.title;
   byId('nextActionDetail').textContent = pendingAction.detail || '';
   byId('nextActionTime').textContent = pendingAction.timeframe || '10 min';
-  byId('completeActionButton').textContent = pendingAction.reviewId && !pendingAction.completeDirect ? 'Review now' : 'Complete & finish';
+  byId('nextMoveBand').textContent = pendingAction.unavailable ? 'Unavailable' : pendingAction.priorityBand ? priorityBandLabel(pendingAction.priorityBand) : 'Caught up';
+  byId('nextMoveBand').className = `next-move-band band-${pendingAction.unavailable ? 'unavailable' : pendingAction.priorityBand || 'done'}`;
+  byId('nextMoveWhyText').textContent = pendingAction.priorityReason || 'OneStep has no meaningful action to recommend right now.';
+  byId('completeActionButton').textContent = pendingAction.actionLabel || 'Do it';
   byId('completeActionButton').hidden = Boolean(pendingAction.passive);
   byId('snoozeActionButton').hidden = Boolean(pendingAction.passive);
   renderDailyCompletion();
+  renderTodaySupporting();
   byId('marginValue').textContent = formatCurrency(summary.plannedMargin);
   byId('cashFlowValue').textContent = formatCurrency(summary.netCashFlow);
   const allTime = month === ALL_TIME_PERIOD;
@@ -444,15 +478,19 @@ function renderMomentum() {
   byId('momentumText').textContent = current ? `${formatCurrency(current)} saved toward ${formatCurrency(target)}. Keep the target small while payments are being stabilised.` : 'Your first win is a completed check-in. The buffer can grow after essential payments are secure.';
   byId('quickCheckInButton').disabled = completedToday;
   byId('quickCheckInButton').textContent = completedToday ? 'Check-in complete today' : 'Complete five-minute check-in';
-  const reviewSelection = selectCheckInReviewItems(state);
+  let reviewSelection = [];
+  try {
+    reviewSelection = selectFiveMinuteCheckIn(state, new Date(), 4, { safetyAssessment: prioritySafety });
+  } catch {
+    recordPriorityDiagnostic(PRIORITY_DIAGNOSTIC_CODES.CONSOLIDATION_INVALID);
+  }
   const reviewList = byId('checkInReviewList'); clear(reviewList);
-  for (const item of reviewSelection) {
-    const presentation = reviewItemPresentation(item, state);
+  for (const workflow of reviewSelection) {
     const row = element('div', 'check-in-review-item');
-    const label = element('strong', '', presentation.title);
-    const button = element('button', 'secondary-button', 'Open');
-    button.type = 'button'; button.dataset.reviewRoute = item.id;
-    button.setAttribute('aria-label', `Open ${presentation.title}`);
+    const label = element('strong', '', workflow.title);
+    const button = element('button', 'secondary-button', workflow.consolidated ? 'Start' : 'Open');
+    button.type = 'button'; button.dataset.reviewRoute = workflow.itemIds[0];
+    button.setAttribute('aria-label', `${workflow.consolidated ? 'Start' : 'Open'} ${workflow.title}`);
     append(row, label, button); reviewList.append(row);
   }
   reviewList.hidden = reviewSelection.length === 0;
@@ -463,15 +501,50 @@ function renderMomentum() {
 }
 
 function renderDailyCompletion() {
-  const completedToday = hasCompletedCheckIn(state.checkIns);
-  document.querySelector('.focus-panel').hidden = completedToday;
-  document.querySelector('.permission-slip').hidden = completedToday;
-  byId('dailyCompleteState').hidden = !completedToday;
+  const done = priorityView.doneForToday;
+  document.querySelector('.focus-panel').hidden = done;
+  document.querySelector('.permission-slip').hidden = done;
+  byId('dailyCompleteState').hidden = !done;
+  byId('dailyCompleteTitle').textContent = 'You’re caught up for now';
+  byId('dailyCompleteText').textContent = priorityView.lowPriorityRemaining
+    ? 'Nothing important needs to take over Today. Lower-priority housekeeping remains available in Review Inbox.'
+    : 'There is no unresolved work worth surfacing today.';
+  byId('todayProgressStatus').textContent = priorityView.unavailable
+    ? 'Next Move is temporarily unavailable. Review Inbox remains available.'
+    : done
+    ? 'You’re caught up for now.'
+    : `${priorityView.todayCount} ${priorityView.todayCount === 1 ? 'thing matters' : 'things matter'} today.`;
+}
+
+function renderTodaySupporting() {
+  const section = byId('todaySupportingSection');
+  const list = byId('todaySupportingList'); clear(list);
+  section.hidden = priorityView.supporting.length === 0;
+  for (const evaluation of priorityView.supporting) {
+    const card = element('article', `today-support-card band-${evaluation.priorityBand}`);
+    const copy = element('div');
+    append(copy, element('span', 'review-priority', priorityBandLabel(evaluation.priorityBand)), element('h3', '', evaluation.title), element('p', '', evaluation.detail));
+    const button = element('button', 'secondary-button', evaluation.inProgress ? 'Continue' : 'Do it');
+    button.type = 'button'; button.dataset.reviewRoute = evaluation.item.id;
+    button.setAttribute('aria-label', `${evaluation.inProgress ? 'Continue' : 'Do'} ${evaluation.title}`);
+    append(card, copy, button); list.append(card);
+  }
 }
 
 function renderReviewInbox() {
   const summary = reviewInboxSummary(state);
-  reviewGroupsById = new Map(summary.groups.map((group) => [group.id, group]));
+  let rankedGroups;
+  try {
+    rankedGroups = prioritisedReviewGroups(state, new Date(), { safetyAssessment: prioritySafety });
+  } catch {
+    recordPriorityDiagnostic(PRIORITY_DIAGNOSTIC_CODES.EVALUATION_FAILED);
+    rankedGroups = summary.groups.map((group) => ({
+      ...group,
+      priorityBand: group.priority === 'high' ? 'important' : group.priority === 'low' ? 'low' : 'normal',
+      priorityReason: 'This unresolved item remains available for review.'
+    }));
+  }
+  reviewGroupsById = new Map(rankedGroups.map((group) => [group.id, group]));
   const count = byId('reviewNavCount');
   count.textContent = String(summary.total);
   count.hidden = summary.total === 0;
@@ -482,15 +555,16 @@ function renderReviewInbox() {
   byId('reviewSummaryText').textContent = summary.total
     ? 'Start with important work. Open details only when you need them.'
     : 'OneStep will put work here only when a decision or correction is genuinely needed.';
-  byId('reviewImportantCount').textContent = summary.important;
-  byId('reviewNormalCount').textContent = summary.normal + summary.low;
+  byId('reviewCriticalCount').textContent = rankedGroups.filter((group) => group.priorityBand === 'critical').length;
+  byId('reviewImportantCount').textContent = rankedGroups.filter((group) => group.priorityBand === 'important').length;
+  byId('reviewNormalCount').textContent = rankedGroups.filter((group) => ['normal', 'low'].includes(group.priorityBand)).length;
   byId('reviewSnoozedCount').textContent = summary.snoozed.length;
   byId('reviewDoneState').hidden = summary.total !== 0;
   byId('reviewActiveSection').hidden = summary.total === 0;
   byId('reviewInboxStatus').textContent = summary.total ? `${summary.total} review items are active.` : 'Nothing needs reviewing right now.';
 
   const activeList = byId('reviewActiveList'); clear(activeList);
-  for (const group of summary.groups) activeList.append(reviewGroupCard(group));
+  for (const group of rankedGroups) activeList.append(reviewGroupCard(group));
 
   const snoozedSection = byId('reviewSnoozedSection');
   const snoozedList = byId('reviewSnoozedList'); clear(snoozedList);
@@ -499,20 +573,27 @@ function renderReviewInbox() {
 
   const welcomePanel = byId('welcomeBackPanel');
   welcomePanel.hidden = !(welcomeBack && summary.total > 0);
-  if (!welcomePanel.hidden) byId('welcomeBackText').textContent = `${Math.min(3, summary.total)} ${summary.total === 1 ? 'thing is' : 'things are'} worth checking. You do not need to catch up on everything.`;
+  if (!welcomePanel.hidden) {
+    const otherCount = Math.max(0, priorityView.unresolvedCount - 1);
+    byId('welcomeBackText').textContent = priorityView.unavailable
+      ? 'Your unresolved work is still in Review Inbox while Next Move is unavailable.'
+      : priorityView.nextMove
+      ? otherCount ? `One thing needs your attention first. ${otherCount} other ${otherCount === 1 ? 'item can' : 'items can'} wait.` : 'One thing needs your attention first. Nothing else needs you today.'
+      : 'Nothing important needs your attention today. Lower-priority work can wait.';
+  }
 }
 
 function reviewGroupCard(group) {
   const presentation = group.presentation;
-  const card = element('article', `review-card priority-${group.priority}`);
+  const card = element('article', `review-card band-${group.priorityBand}`);
   card.dataset.reviewGroup = group.id;
   const copy = element('div', 'review-card-copy');
   const heading = element('div', 'review-card-heading');
-  append(heading, element('h3', '', presentation.title), element('span', 'review-priority', group.priority === 'high' ? 'Important' : 'Normal'));
+  append(heading, element('h3', '', presentation.title), element('span', 'review-priority', priorityBandLabel(group.priorityBand)));
   append(copy, heading, element('p', 'review-card-detail', presentation.detail));
   const explanation = element('details', 'review-explanation');
-  explanation.append(element('summary', '', 'Why does this need review?'));
-  explanation.append(element('p', '', `${presentation.why} ${presentation.consequence}`));
+  explanation.append(element('summary', '', 'Why this?'));
+  explanation.append(element('p', '', `${group.priorityReason} ${presentation.consequence}`));
   copy.append(explanation);
   if (group.type === 'uncategorised_payment' && group.items.length > 1) copy.append(reviewGroupDetails(group));
 
@@ -621,6 +702,7 @@ async function openReviewWorkflow(itemId) {
   if (!item || item.status === 'resolved') { render(); showToast('That review work is already complete.'); return; }
   startReviewItem(state, itemId);
   await saveState();
+  render();
   const route = reviewRoute(item, state);
   if (route.type === 'transaction') {
     const transaction = state.transactions.find((entry) => String(entry.id) === route.id);
@@ -650,12 +732,32 @@ async function openReviewWorkflow(itemId) {
     transactionPage = 1; populateMonthOptions(); selectView('transactions'); renderTransactions(); focusTransactionTable();
     return;
   }
+  if (route.type === 'task' && route.targetType && route.targetId) {
+    selectView(route.view);
+    openEditor(route.targetType, route.targetId, { reviewItemId: item.id });
+    return;
+  }
   selectView(route.view);
 }
 
 function formatReviewDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'later' : new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+function priorityBandLabel(value) {
+  return ({ critical: 'Critical', important: 'Important', normal: 'Normal', low: 'Low' })[value] || 'Normal';
+}
+
+function unavailablePriorityView() {
+  return {
+    nextMove: null, today: [], supporting: [], candidates: [], doneForToday: false, unavailable: true,
+    unresolvedCount: 0, todayCount: 0, lowPriorityRemaining: 0
+  };
+}
+
+function recordPriorityDiagnostic(code) {
+  window.financeAPI?.recordRendererFault(code).catch(() => {});
 }
 
 function renderTransactions() {
@@ -1177,64 +1279,22 @@ function renderCreditReportChanges(plan) {
 }
 
 async function completeNextAction() {
-  if (hasCompletedCheckIn(state.checkIns)) return;
-  if (pendingAction.reviewId) {
-    if (pendingAction.completeDirect) {
-      const item = state.reviewItems.find((entry) => entry.id === pendingAction.reviewId);
-      const task = state.tasks.find((entry) => String(entry.id) === item?.sourceId);
-      if (task) task.completedAt = new Date().toISOString();
-      synchroniseReviewItems(state);
-      state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: item?.sourceId, note: pendingAction.title });
-      await saveState(); render(); showToast('Today is complete. You can close the app now.');
-      return;
-    }
-    await openReviewWorkflow(pendingAction.reviewId);
+  if (!pendingAction.reviewId) return;
+  if (pendingAction.completeDirect) {
+    const item = state.reviewItems.find((entry) => entry.id === pendingAction.reviewId);
+    const task = state.tasks.find((entry) => String(entry.id) === item?.sourceId);
+    if (task) task.completedAt = new Date().toISOString();
+    synchroniseReviewItems(state);
+    state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: item?.sourceId, note: pendingAction.title });
+    await saveState(); render(); showToast('Action completed. Here is what matters next.');
     return;
   }
-  const blocker = actionCompletionBlocker(pendingAction);
-  if (blocker) {
-    byId('nextActionDetail').textContent = blocker;
-    const panel = document.querySelector('.focus-panel');
-    panel.classList.remove('is-blocked');
-    void panel.offsetWidth;
-    panel.classList.add('is-blocked');
-    window.setTimeout(() => panel.classList.remove('is-blocked'), 460);
-    showToast('This action is still open. Complete it, or use the five-minute check-in below.');
-    return;
-  }
-  const task = state.tasks.find((item) => item.id === pendingAction.id);
-  if (task) task.completedAt = new Date().toISOString();
-  state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: pendingAction.id, note: pendingAction.title });
-  await saveState();
-  await animateFocusPanel('is-completing', 360);
-  render();
-  showToast('Today is complete. You can close the app now.');
-}
-
-function actionCompletionBlocker(action) {
-  if (action.id === 'generated-first-account' && !state.accounts.length) return 'This step is still open: add an account in Settings first. If you only reviewed your money today, use the five-minute check-in below instead.';
-  if (action.id === 'generated-first-import' && !state.transactions.length) return 'This step is still open: import and confirm at least one payment first. If you only reviewed your money today, use the five-minute check-in below instead.';
-  return '';
+  await openReviewWorkflow(pendingAction.reviewId);
 }
 
 async function snoozeNextAction() {
-  if (pendingAction.reviewId) {
-    snoozeReviewItem(state, pendingAction.reviewId, 'tomorrow');
-    await saveState();
-    await animateFocusPanel('is-switching', 180);
-    render();
-    showToast('Snoozed until tomorrow. Here is your next available step.');
-    return;
-  }
-  const task = state.tasks.find((item) => item.id === pendingAction.id);
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const snoozedUntil = localDateKey(tomorrow);
-  if (task) task.snoozedUntil = snoozedUntil;
-  else {
-    state.settings.snoozedActions ||= {};
-    state.settings.snoozedActions[pendingAction.id] = snoozedUntil;
-  }
+  if (!pendingAction.reviewId) return;
+  snoozeReviewItem(state, pendingAction.reviewId, 'tomorrow');
   await saveState();
   await animateFocusPanel('is-switching', 180);
   render();
@@ -1944,7 +2004,6 @@ async function runSingleClickAction(event, busyLabel, action, afterAction) {
   }
 }
 function monthLabel(month) { if (!/^\d{4}-\d{2}$/.test(month || '')) return month || 'Unknown'; return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T12:00:00`)); }
-function localDateKey(value) { const date = value instanceof Date ? value : new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function titleCase(value) { return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()); }
 function statusLabel(value) { return value ? `Status: ${titleCase(value)}` : 'No notes yet'; }
 function arrangementLabel(item) { return item.arrangementStatus === 'confirmed' ? 'Confirmed' : item.arrangementStatus === 'none' ? 'None confirmed' : 'Unknown'; }

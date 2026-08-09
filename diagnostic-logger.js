@@ -30,7 +30,10 @@ const EVENT_DEFINITIONS = Object.freeze({
   RENDERER_UNHANDLED_ERROR: { level: 'error', reference: 'UI-101', stage: 'renderer', layer: 'detail' },
   RENDERER_UNHANDLED_REJECTION: { level: 'error', reference: 'UI-102', stage: 'renderer', layer: 'detail' },
   RENDERER_PROCESS_GONE: { level: 'error', reference: 'UI-103', stage: 'renderer', layer: 'detail' },
-  RENDERER_UNRESPONSIVE: { level: 'error', reference: 'UI-104', stage: 'renderer', layer: 'detail' }
+  RENDERER_UNRESPONSIVE: { level: 'error', reference: 'UI-104', stage: 'renderer', layer: 'detail' },
+  PRIORITY_EVALUATION_FAILED: { level: 'error', reference: 'UI-105', stage: 'priority', layer: 'detail' },
+  NEXT_MOVE_UNAVAILABLE: { level: 'warning', reference: 'UI-106', stage: 'priority', layer: 'detail' },
+  ACTION_CONSOLIDATION_INVALID: { level: 'error', reference: 'UI-107', stage: 'priority', layer: 'detail' }
 });
 
 const FAULT_CLASSIFIERS = [
@@ -65,7 +68,10 @@ const ALLOWED_REFERENCES = new Set([
 
 export const RENDERER_FAULT_EVENTS = Object.freeze([
   'RENDERER_UNHANDLED_ERROR',
-  'RENDERER_UNHANDLED_REJECTION'
+  'RENDERER_UNHANDLED_REJECTION',
+  'PRIORITY_EVALUATION_FAILED',
+  'NEXT_MOVE_UNAVAILABLE',
+  'ACTION_CONSOLIDATION_INVALID'
 ]);
 
 export class DiagnosticLogger {

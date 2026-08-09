@@ -2111,8 +2111,12 @@ function validateMigratedState(state) {
       || typeof item.type !== 'string'
       || typeof item.sourceType !== 'string'
       || typeof item.sourceId !== 'string'
+      || !Number.isInteger(item.snoozeCount)
+      || item.snoozeCount < 0
       || !validIsoDate(item.createdAt)
       || !validIsoDate(item.updatedAt)
+      || (item.lastSnoozedAt !== null && !validIsoDate(item.lastSnoozedAt))
+      || (item.snoozeCount === 0 && item.lastSnoozedAt !== null)
       || (item.snoozedUntil !== null && !validIsoDate(item.snoozedUntil))
       || (item.status === 'snoozed') !== (item.snoozedUntil !== null)
       || (item.status === 'resolved') !== Boolean(item.resolution)
