@@ -1,6 +1,7 @@
 import { localFinancialMonthKey } from './date-utils.js';
 
 export const SCHEMA_VERSION = 7;
+export const ALL_TIME_PERIOD = 'all';
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -37,28 +38,31 @@ export function availableReportingMonths(state = {}, fallbackMonth = state.setti
 }
 
 export function periodTransactions(transactions, month) {
-  return (transactions || []).filter((transaction) => String(transaction.budgetMonth || transaction.date || '').slice(0, 7) === month
+  return (transactions || []).filter((transaction) => (month === ALL_TIME_PERIOD
+    || String(transaction.budgetMonth || transaction.date || '').slice(0, 7) === month)
     && isTransactionFinanciallyActive(transaction));
 }
 
 export function calculatePeriodSummary(state, month = state.settings?.selectedMonth) {
+  const monthCount = reportingPeriodMonthCount(state, month);
   const rows = periodTransactions(state.transactions, month);
   const external = rows.filter(isExternalCashflowTransaction);
   const income = sum(external, 'incoming');
   const spending = sum(external, 'outgoing');
-  const payslips = (state.payslips || []).filter((payslip) => payslip.period === month);
+  const payslips = (state.payslips || []).filter((payslip) => month === ALL_TIME_PERIOD || payslip.period === month);
   const grossPay = sum(payslips, 'grossPay');
   const payrollDeductions = sum(payslips, 'totalDeductions');
   const netPay = sum(payslips, 'netPay');
-  const plannedSpending = roundMoney((state.budgets || []).reduce((total, budget) => total + Number(budget.planned || 0), 0));
-  const dependableIncome = Number(state.profile?.dependableIncome || 0);
-  const plannedMargin = roundMoney(dependableIncome - plannedSpending);
   const budget = calculateBudgetAnalysis(state, month);
+  const plannedSpending = budget.planned;
+  const dependableMonthlyIncome = Number(state.profile?.dependableIncome || 0);
+  const dependableIncome = roundMoney(dependableMonthlyIncome * monthCount);
+  const plannedMargin = roundMoney(dependableIncome - plannedSpending);
   const overdrafts = sum(state.overdrafts, 'currentBalance');
   const debts = sum(state.debts, 'currentBalance');
   return {
-    month, income, spending, netCashFlow: roundMoney(income - spending),
-    grossPay, payrollDeductions, netPay, dependableIncome, plannedSpending, plannedMargin,
+    month, monthCount, income, spending, netCashFlow: roundMoney(income - spending),
+    grossPay, payrollDeductions, netPay, dependableMonthlyIncome, dependableIncome, plannedSpending, plannedMargin,
     budgetActualSpending: budget.actual, budgetCategorisedSpending: budget.categorisedActual,
     budgetUncategorisedSpending: budget.uncategorisedActual, budgetRemaining: budget.remaining,
     debts, overdrafts, totalOwed: roundMoney(debts + overdrafts), transactionCount: rows.length
@@ -84,6 +88,7 @@ export function removeBudgetCategory(state, budgetId) {
 
 export function calculateBudgetAnalysis(state, month = state.settings?.selectedMonth) {
   const budgets = state.budgets || [];
+  const monthCount = reportingPeriodMonthCount(state, month);
   const transactions = periodTransactions(state.transactions, month);
   const budgetsById = new Map(budgets.map((budget) => [String(budget.id), budget]));
   const transactionsById = new Map((state.transactions || []).map((transaction) => [String(transaction.id), transaction]));
@@ -165,12 +170,13 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   }
 
   const rows = budgets.map((budget) => {
-    const plannedPennies = moneyToPennies(budget.planned);
+    const monthlyPlanned = penniesToMoney(moneyToPennies(budget.planned));
+    const plannedPennies = moneyToPennies(monthlyPlanned) * monthCount;
     const actual = penniesToMoney(actualPennies.get(String(budget.id)) || 0);
     const planned = penniesToMoney(plannedPennies);
     const remaining = penniesToMoney(plannedPennies - moneyToPennies(actual));
     return {
-      ...budget, planned, actual, remaining,
+      ...budget, monthlyPlanned, planned, actual, remaining,
       progressPercent: plannedPennies > 0 ? Math.max(0, Math.round(((actualPennies.get(String(budget.id)) || 0) / plannedPennies) * 100)) : null,
       contributions: contributions.get(String(budget.id)) || []
     };
@@ -180,6 +186,7 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   const totalActualPennies = categorisedPennies + uncategorisedPennies;
   return {
     month,
+    monthCount,
     rows,
     planned: penniesToMoney(plannedPennies),
     categorisedActual: penniesToMoney(categorisedPennies),
@@ -189,6 +196,21 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
     coveragePercent: eligibleGrossPennies > 0 ? Math.round((categorisedGrossPennies / eligibleGrossPennies) * 100) : 100,
     uncategorisedTransactionIds
   };
+}
+
+export function reportingPeriodMonthCount(state, month = state.settings?.selectedMonth) {
+  if (month !== ALL_TIME_PERIOD) return 1;
+  const months = new Set();
+  for (const transaction of state.transactions || []) {
+    if (!isTransactionFinanciallyActive(transaction)) continue;
+    const reportingPeriod = reportingMonth(transaction.budgetMonth) || reportingMonth(transaction.date);
+    if (reportingPeriod) months.add(reportingPeriod);
+  }
+  for (const payslip of state.payslips || []) {
+    const reportingPeriod = reportingMonth(payslip.period) || reportingMonth(payslip.payDate);
+    if (reportingPeriod) months.add(reportingPeriod);
+  }
+  return Math.max(1, months.size);
 }
 
 function compareBudgetUsageDescending(left, right) {
@@ -640,7 +662,8 @@ export function buildFallbackAnswer(question, state) {
       : ` No unsafe extra payment is included. ${plan.explanations[0] || 'OneStep does not have enough confirmed information to recommend one safely.'}`;
     return `Your recorded debt and overdrafts total ${formatCurrency(summary.totalOwed)}.${safetyMessage} The payoff forecast is provisional while ${plan.unknownApr.length} rate${plan.unknownApr.length === 1 ? ' is' : 's are'} unknown.`;
   }
-  return `Your selected month shows ${formatCurrency(summary.income)} external money in and ${formatCurrency(summary.spending)} out. The safest next move is: ${next.title}.`;
+  const periodLabel = summary.month === ALL_TIME_PERIOD ? `Across all ${summary.monthCount} months held` : 'Your selected month';
+  return `${periodLabel} shows ${formatCurrency(summary.income)} external money in and ${formatCurrency(summary.spending)} out. The safest next move is: ${next.title}.`;
 }
 
 function priorityOrder(items, balances, strategy) {

@@ -288,3 +288,47 @@ test('period summary exposes the same shared budget totals used by the budget ro
   assert.equal(summary.budgetActualSpending, 75);
   assert.equal(summary.budgetRemaining, 125);
 });
+
+test('all-time reporting multiplies monthly plans by trusted months held and totals every active payment', () => {
+  const input = state({
+    settings: { selectedMonth: 'all' },
+    budgets: [{ id: 'groceries', category: 'Groceries', planned: 200 }],
+    payslips: [{ id: 'july-pay', period: '2026-07', grossPay: 2500, totalDeductions: 500, netPay: 2000 }],
+    transactions: [
+      outgoing('august', 80, { category: 'Groceries' }),
+      outgoing('june', 45, { budgetMonth: '2026-06', date: '2026-06-12', category: 'Groceries' }),
+      outgoing('pending-may', 999, {
+        budgetMonth: '2026-05', date: '2026-05-10', category: 'Groceries',
+        duplicateStatus: 'possible', reviewStatus: 'pending', financiallyActive: false
+      })
+    ]
+  });
+
+  const analysis = calculateBudgetAnalysis(input);
+  const summary = calculatePeriodSummary(input);
+
+  assert.equal(analysis.monthCount, 3);
+  assert.equal(analysis.rows[0].monthlyPlanned, 200);
+  assert.equal(analysis.rows[0].planned, 600);
+  assert.equal(analysis.rows[0].actual, 125);
+  assert.equal(analysis.rows[0].remaining, 475);
+  assert.equal(analysis.rows[0].progressPercent, 21);
+  assert.equal(summary.dependableMonthlyIncome, 2000);
+  assert.equal(summary.dependableIncome, 6000);
+  assert.equal(summary.plannedSpending, 600);
+  assert.equal(summary.spending, 125);
+  assert.equal(summary.grossPay, 2500);
+  assert.equal(summary.transactionCount, 2);
+  assert.match(financialSnapshot(input), /Reporting period: All time \(3 months held\)/);
+  assert.match(financialSnapshot(input), /External cash flow: £0\.00 in; £125\.00 out; -£125\.00 net/);
+});
+
+test('all-time reporting controls and multiplier explanation are visible in the desktop UI', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const renderer = fs.readFileSync(new URL('../renderer-app.js', import.meta.url), 'utf8');
+  assert.match(html, /aria-label="Reporting period"/);
+  assert.match(html, /id="budgetPeriodDescription"/);
+  assert.match(renderer, /allTime\.textContent = `All time · \$\{monthCount\} month/);
+  assert.match(renderer, /Every monthly budget quantity and dependable income amount is multiplied by/);
+  assert.match(renderer, /state\.settings\.selectedMonth === ALL_TIME_PERIOD/);
+});

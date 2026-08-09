@@ -1,4 +1,4 @@
-import { calculateBudgetAnalysis, calculatePeriodSummary, debtPlan } from './finance-core.js';
+import { ALL_TIME_PERIOD, calculateBudgetAnalysis, calculatePeriodSummary, debtPlan } from './finance-core.js';
 
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/chat';
 
@@ -43,17 +43,17 @@ export function financialSnapshot(state) {
   const plan = debtPlan(state, 'hybrid');
   const month = state.settings?.selectedMonth || '';
   const summary = calculatePeriodSummary(state, month);
-  const incoming = money(summary.income);
-  const outgoing = money(summary.spending);
   const budgetAnalysis = calculateBudgetAnalysis(state, month);
+  const periodLabel = month === ALL_TIME_PERIOD ? `All time (${summary.monthCount} months held)` : `Selected month: ${month}`;
   const budgets = budgetAnalysis.rows.map((item) => `${item.category}: planned ${money(item.planned)}, spent ${money(item.actual)}, remaining ${money(item.remaining)}`).join('; ');
   const debts = (state.debts || []).map((item) => `${item.name}: balance ${money(item.currentBalance)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, contractual payment ${knownMoney(item.contractualPayment)}, status ${item.status || 'unknown'}, arrangement ${item.arrangementStatus || 'unknown'}, arrangement payment ${knownMoney(item.arrangementPayment)}, status conflict ${item.statusConflict ? 'yes' : 'no'}, interest frozen ${item.interestFrozen ? 'yes' : 'no'}`).join('\n');
   const overdrafts = (state.overdrafts || []).map((item) => `${item.name}: used ${money(item.currentBalance)}, limit ${knownMoney(item.limit)}, APR ${item.apr == null ? 'unknown' : `${(item.apr * 100).toFixed(2)}%`}, contractual payment ${knownMoney(item.contractualPayment)}, status ${item.status || 'unknown'}, arrangement ${item.arrangementStatus || 'unknown'}, arrangement payment ${knownMoney(item.arrangementPayment)}, status conflict ${item.statusConflict ? 'yes' : 'no'}`).join('\n');
   return [
     'VERIFIED LOCAL FINANCIAL SNAPSHOT',
-    `Selected month: ${month}`,
+    `Reporting period: ${periodLabel}`,
     `Dependable monthly bank income: ${money(state.profile?.dependableIncome)}`,
-    `External cash flow: ${incoming} in; ${outgoing} out; ${money(incoming - outgoing)} net`,
+    `Dependable income for reporting period: ${money(summary.dependableIncome)}`,
+    `External cash flow: ${money(summary.income)} in; ${money(summary.spending)} out; ${money(summary.netCashFlow)} net`,
     `Starter buffer: ${money(state.settings?.emergencyBufferBalance)} of ${money(state.settings?.emergencyBufferTarget)}`,
     `Planned extra debt payment: ${money(state.settings?.extraDebtPayment)}`,
     `Budgets: ${budgets}`,

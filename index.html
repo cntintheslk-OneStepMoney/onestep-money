@@ -71,7 +71,7 @@
         <header class="topbar">
           <div class="title-stack"><p class="eyebrow" id="viewEyebrow">ONE CLEAR MOVE</p><h1 id="viewTitle">Today</h1></div>
           <div class="topbar-actions">
-            <label class="compact-field">Month<select id="monthSelect" aria-label="Reporting month"></select></label>
+            <label class="compact-field">Period<select id="monthSelect" aria-label="Reporting period"></select></label>
             <div class="streak-chip" title="Weeks with a completed check-in"><span class="streak-icon" aria-hidden="true">◆</span><span><strong id="streakValue">0</strong> week streak</span></div>
           </div>
         </header>
@@ -117,7 +117,7 @@
 
         <section id="view-pay" class="view" hidden>
           <div class="section-actions"><div><h2>Pay and deductions</h2><p>Gross pay, allowances, tax, National Insurance and net pay are tracked without double-counting your bank income.</p></div><button id="importPayslipButton" class="primary-button">Import payslip</button></div>
-          <div class="metric-grid three"><article class="metric-card"><span>Gross pay</span><strong id="grossPayValue">£0.00</strong><small>Selected month</small></article><article class="metric-card"><span>Payroll deductions</span><strong id="deductionsValue">£0.00</strong><small>Tax, NI and other deductions</small></article><article class="metric-card"><span>Net pay</span><strong id="netPayValue">£0.00</strong><small>Amount paid by payroll</small></article></div>
+          <div class="metric-grid three"><article class="metric-card"><span>Gross pay</span><strong id="grossPayValue">£0.00</strong><small id="grossPayHint">Selected month</small></article><article class="metric-card"><span>Payroll deductions</span><strong id="deductionsValue">£0.00</strong><small id="deductionsHint">Tax, NI and other deductions</small></article><article class="metric-card"><span>Net pay</span><strong id="netPayValue">£0.00</strong><small id="netPayHint">Amount paid by payroll</small></article></div>
           <div id="payslipList" class="card-list"></div>
         </section>
 
@@ -135,8 +135,8 @@
         </section>
 
         <section id="view-budget" class="view" hidden>
-          <div class="section-actions"><div><h2>Simple monthly plan</h2><p>Dependable income first. Variable income stays separate until it arrives.</p></div><button class="primary-button" data-add="budget">Add budget item</button></div>
-          <article class="panel budget-summary"><div><span>Dependable income</span><strong id="budgetIncomeValue">£0.00</strong></div><div><span>Planned</span><strong id="plannedSpendingValue">£0.00</strong></div><div><span>Spent</span><strong id="actualSpendingValue">£0.00</strong></div><div><span>Remaining plan</span><strong id="budgetRemainingValue">£0.00</strong></div></article>
+          <div class="section-actions"><div><h2 id="budgetPeriodHeading">Simple monthly plan</h2><p id="budgetPeriodDescription">Dependable income first. Variable income stays separate until it arrives.</p></div><button class="primary-button" data-add="budget">Add budget item</button></div>
+          <article class="panel budget-summary"><div><span id="budgetIncomeLabel">Dependable income</span><strong id="budgetIncomeValue">£0.00</strong></div><div><span id="plannedSpendingLabel">Planned</span><strong id="plannedSpendingValue">£0.00</strong></div><div><span id="actualSpendingLabel">Spent</span><strong id="actualSpendingValue">£0.00</strong></div><div><span id="budgetRemainingLabel">Remaining plan</span><strong id="budgetRemainingValue">£0.00</strong></div></article>
           <article id="uncategorisedBudgetNotice" class="panel budget-notice" hidden><div><strong><span id="uncategorisedBudgetValue">£0.00</span> needs categorising</strong><span id="budgetCoverageValue">100% of outgoing spending categorised</span></div><button id="reviewUncategorisedButton" class="secondary-button" type="button">Review payments</button></article>
           <div class="two-column budget-layout"><article class="panel"><h2>Plan versus actual</h2><div id="budgetRows" class="budget-list"></div></article><article class="panel"><h2>Penny-pinching ideas</h2><p class="muted">Based on your own imported spending. Review one item at a time.</p><div id="savingsIdeas" class="checks-list"></div></article></div>
         </section>
