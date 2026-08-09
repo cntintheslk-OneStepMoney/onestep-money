@@ -11,7 +11,7 @@ export function parseImportedDocument(fileName, payload, requestedKind = 'auto',
   const kind = requestedKind === 'auto' ? inferDocumentKind(fileName, payload?.text || String(payload || '')) : requestedKind;
 
   if (kind === 'payslip') {
-    return parsePayslipText(payload.text || String(payload || ''), fileName);
+    return parsePayslipDocument(payload, fileName);
   }
 
   if (kind === 'credit-report') {
@@ -31,7 +31,80 @@ export function parseImportedDocument(fileName, payload, requestedKind = 'auto',
   return rejectedImport('Unsupported file type. Use PDF, CSV, TSV, QIF, OFX, QFX or JSON.');
 }
 
+export function parsePayslipDocument(payload, fileName = 'Payslip.pdf') {
+  const document = payload && typeof payload === 'object' ? payload : { text: String(payload || '') };
+  const text = document.text || '';
+  return isMyNavyPayslip(text)
+    ? parseMyNavyPayslip(document, fileName)
+    : parsePayslipText(text, fileName);
+}
+
+export function parseMyNavyPayslip(document, fileName = 'MyNavy-payslip.pdf') {
+  const sourceText = String(document?.text || document || '');
+  const normal = normaliseWhitespace(sourceText);
+  const summaryValues = myNavySummaryValues(normal);
+  const currentBalances = labelledPayBalances(normal, 'PTD');
+  const ytdBalances = labelledPayBalances(normal, 'YTD');
+  const payDateText = myNavyPayDate(document, normal);
+  const payDate = parseDate(payDateText.replace(/-/g, ' '));
+  const period = payDate ? payDate.slice(0, 7) : '';
+  const annualSalary = findMoney(normal, /Annual Salary\s+([\d,]+\.\d{2})/i);
+  const taxDetails = myNavyTaxDetails(document, sourceText);
+  const table = myNavyLineItems(document, sourceText, summaryValues);
+  const gross = summaryValues.gross ?? currentBalances.grossPay;
+  const totalDeductions = summaryValues.deductions ?? roundMoney(table.deductions.reduce((sum, item) => sum + item.amount, 0));
+  const net = summaryValues.net;
+  const warnings = [];
+  const rejected = [];
+  const earningsTotal = roundMoney(table.earnings.reduce((sum, item) => sum + item.amount, 0));
+  const deductionsTotal = roundMoney(table.deductions.reduce((sum, item) => sum + item.amount, 0));
+
+  if (!period || gross === null || net === null) rejected.push({ row: 1, reason: 'Could not find the pay date, total gross pay or total amount paid.' });
+  if (!table.earnings.length) warnings.push('No itemised payment lines were detected.');
+  if (!table.deductions.length && totalDeductions) warnings.push('No itemised deduction lines were detected.');
+  if (gross !== null && table.earnings.length && Math.abs(earningsTotal - gross) > 0.02) warnings.push(`Payment lines total £${earningsTotal.toFixed(2)}, not gross pay £${gross.toFixed(2)}.`);
+  if (totalDeductions !== null && table.deductions.length && Math.abs(deductionsTotal - totalDeductions) > 0.02) warnings.push(`Deduction lines total £${deductionsTotal.toFixed(2)}, not £${totalDeductions.toFixed(2)}.`);
+  if (gross !== null && net !== null && totalDeductions !== null && Math.abs(roundMoney(gross - totalDeductions) - net) > 0.02) warnings.push('Gross pay less deductions does not reconcile to net pay.');
+
+  const payslip = {
+    id: stableId('payslip', fileName, period, gross, net),
+    provider: 'mynavy',
+    period,
+    payDate,
+    annualSalary,
+    grossPay: gross,
+    taxablePay: currentBalances.taxablePay,
+    niablePay: currentBalances.niablePay,
+    totalDeductions,
+    netPay: net,
+    taxCode: taxDetails.taxCode,
+    taxBasis: taxDetails.taxBasis,
+    niCategory: taxDetails.niCategory,
+    employerPayeReference: taxDetails.employerPayeReference,
+    grossPayYtd: ytdBalances.grossPay,
+    taxablePayYtd: ytdBalances.taxablePay,
+    niablePayYtd: ytdBalances.niablePay,
+    payeYtd: ytdBalances.paye,
+    niEmployeeYtd: ytdBalances.niEmployee,
+    niEmployerYtd: ytdBalances.niEmployer,
+    earnings: table.earnings,
+    deductions: table.deductions,
+    notes: '',
+    source: fileName
+  };
+
+  return {
+    kind: 'payslip',
+    records: rejected.length ? [] : [payslip],
+    rejected,
+    warnings,
+    summary: { provider: 'mynavy', period, gross, deductions: totalDeductions, net, earningsTotal },
+    reconciled: !rejected.length && !warnings.length
+  };
+}
+
 export function parsePayslipText(text, fileName = 'Payslip.pdf') {
+  if (isMyNavyPayslip(text)) return parseMyNavyPayslip({ text }, fileName);
   const normal = normaliseWhitespace(text);
   const gross = findMoney(normal, /Gross Pay PTD\s+([\d,]+\.\d{2})/i);
   const taxable = findMoney(normal, /Taxable Pay PTD\s+([\d,]+\.\d{2})/i);
@@ -61,6 +134,7 @@ export function parsePayslipText(text, fileName = 'Payslip.pdf') {
 
   const payslip = {
     id: stableId('payslip', fileName, period, gross, net),
+    provider: 'jpa',
     period,
     payDate,
     annualSalary,
@@ -83,6 +157,139 @@ export function parsePayslipText(text, fileName = 'Payslip.pdf') {
     summary: { period, gross, deductions: totalDeductions || deductionsTotal, net, earningsTotal },
     reconciled: !rejected.length && !warnings.length
   };
+}
+
+function isMyNavyPayslip(text) {
+  const value = String(text || '');
+  return /Statement of Salary and Deductions/i.test(value)
+    && /Summary of Payments/i.test(value)
+    && /Total Amount Paid/i.test(value);
+}
+
+function myNavySummaryValues(text) {
+  const match = String(text || '').match(/Total Gross Pay\s+Total Deductions\s+Total Amount Paid\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})/i);
+  return {
+    gross: match ? parseMoney(match[1]) : findMoney(text, /Total Gross Pay\s+(-?[\d,]+\.\d{2})/i),
+    deductions: match ? parseMoney(match[2]) : findMoney(text, /Total Deductions\s+(-?[\d,]+\.\d{2})/i),
+    net: match ? parseMoney(match[3]) : findMoney(text, /Total Amount Paid\s+(-?[\d,]+\.\d{2})/i)
+  };
+}
+
+function myNavyPayDate(document, text) {
+  for (const page of document?.pages || []) {
+    const heading = page.lines?.find((line) => line.items?.some((item) => /^Pay Date$/i.test(item.text)));
+    const headingItem = heading?.items?.find((item) => /^Pay Date$/i.test(item.text));
+    if (!heading || !headingItem) continue;
+    const valueLine = page.lines.find((line) => line.y < heading.y && heading.y - line.y < 18);
+    const value = valueLine?.items?.find((item) => item.x >= headingItem.x - 8)?.text || '';
+    if (/^\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[- ]20\d{2}$/i.test(value)) return value;
+  }
+  return String(text || '').match(/Pay Date[\s\S]{0,80}?(\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[- ]20\d{2})/i)?.[1] || '';
+}
+
+function labelledPayBalances(text, period) {
+  const value = String(text || '');
+  return {
+    grossPay: findMoney(value, new RegExp(`Gross Pay ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i')),
+    taxablePay: findMoney(value, new RegExp(`Taxable Pay ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i')),
+    niablePay: findMoney(value, new RegExp(`NIable Pay ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i')),
+    paye: findMoney(value, new RegExp(`PAYE ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i')),
+    niEmployee: findMoney(value, new RegExp(`NI Employee ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i')),
+    niEmployer: findMoney(value, new RegExp(`NI Employer ${period}\\s+(-?[\\d,]+\\.\\d{2})`, 'i'))
+  };
+}
+
+function myNavyTaxDetails(document, text) {
+  for (const page of document?.pages || []) {
+    const headings = page.lines?.find((line) => line.items?.some((item) => /^Tax Code$/i.test(item.text)) && line.items.some((item) => /PAYE Reference/i.test(item.text)));
+    if (!headings) continue;
+    const values = page.lines.find((line) => line.y < headings.y && headings.y - line.y < 18 && line.items?.length >= 3);
+    if (!values) continue;
+    return {
+      taxCode: valueAtX(values.items, 0, 200),
+      taxBasis: valueAtX(values.items, 200, 360),
+      niCategory: valueAtX(values.items, 360, 470),
+      employerPayeReference: valueAtX(values.items, 470, Infinity)
+    };
+  }
+
+  const normal = normaliseWhitespace(text);
+  const match = normal.match(/Tax Code\s+Tax Basis\s+NI Category\s+Employers PAYE Reference Number\s+(\S+)\s+(.+?)\s+([A-Z])\s+(\S+)/i);
+  return {
+    taxCode: match?.[1] || '',
+    taxBasis: match?.[2]?.trim() || '',
+    niCategory: match?.[3] || '',
+    employerPayeReference: match?.[4] || ''
+  };
+}
+
+function valueAtX(items, minimum, maximum) {
+  return (items || []).filter((item) => item.x >= minimum && item.x < maximum).map((item) => item.text).join(' ').trim();
+}
+
+function myNavyLineItems(document, text, expected) {
+  for (const page of document?.pages || []) {
+    const header = page.lines?.find((line) => line.items?.some((item) => /^Payments$/i.test(item.text)) && line.items.some((item) => /^Deductions$/i.test(item.text)));
+    const footer = page.lines?.find((line) => line.items?.some((item) => /^Net Pay \/ Distribution$/i.test(item.text)));
+    if (!header || !footer || header.y <= footer.y) continue;
+    const splitX = header.items.find((item) => /^Deductions$/i.test(item.text))?.x;
+    if (!Number.isFinite(splitX)) continue;
+    const earnings = [];
+    const deductions = [];
+    const rows = page.lines.filter((line) => line.y < header.y && line.y > footer.y);
+    for (const line of rows) {
+      const left = parsePayTableSide(line.items.filter((item) => item.x < splitX), 'earning');
+      const right = parsePayTableSide(line.items.filter((item) => item.x >= splitX), 'deduction');
+      if (left) earnings.push(left);
+      if (right) deductions.push(right);
+    }
+    if (earnings.length || deductions.length) return { earnings, deductions };
+  }
+  return myNavyTextLineItems(text, expected);
+}
+
+function parsePayTableSide(items, type) {
+  const values = (items || []).filter((item) => !/^(?:Description|Amount)$/i.test(item.text));
+  const amountIndex = values.findLastIndex((item) => MONEY_PATTERN.test(item.text));
+  if (amountIndex <= 0) return null;
+  const name = values.slice(0, amountIndex).map((item) => item.text).join(' ').trim();
+  const amount = parseMoney(values[amountIndex].text);
+  if (!name || amount === null) return null;
+  return { id: stableId(type, name), name, amount, type, notes: '' };
+}
+
+function myNavyTextLineItems(text, expected = {}) {
+  const lines = String(text || '').split(/\r?\n/);
+  const start = lines.findIndex((line) => /^\s*Payments\s{2,}Deductions\s*$/i.test(line));
+  const end = lines.findIndex((line, index) => index > start && /Net Pay\s*\/\s*Distribution/i.test(line));
+  if (start < 0 || end < 0) return { earnings: [], deductions: [] };
+  const earnings = [];
+  const deductions = [];
+  for (const line of lines.slice(start + 1, end)) {
+    if (/^\s*(?:Description\s+Amount){1,2}\s*$/i.test(line)) continue;
+    const parts = line.trim().split(/\s{3,}/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 4 && MONEY_PATTERN.test(parts[1]) && MONEY_PATTERN.test(parts.at(-1))) {
+      const left = textPayItem(parts[0], parts[1], 'earning');
+      const right = textPayItem(parts.slice(2, -1).join(' '), parts.at(-1), 'deduction');
+      if (left) earnings.push(left);
+      if (right) deductions.push(right);
+      continue;
+    }
+    const match = line.trim().match(/^(.*?)\s+(-?[\d,]+\.\d{2})\s*$/);
+    if (!match) continue;
+    const earningsTotal = roundMoney(earnings.reduce((sum, item) => sum + item.amount, 0));
+    const type = expected.gross !== null && Math.abs(earningsTotal - Number(expected.gross || 0)) <= 0.02 ? 'deduction' : 'earning';
+    const item = textPayItem(match[1], match[2], type);
+    if (item) (type === 'deduction' ? deductions : earnings).push(item);
+  }
+  return { earnings, deductions };
+}
+
+function textPayItem(name, value, type) {
+  const amount = parseMoney(value);
+  const label = String(name || '').trim();
+  if (!label || amount === null) return null;
+  return { id: stableId(type, label), name: label, amount, type, notes: '' };
 }
 
 export function parseCreditReportText(text, fileName = 'credit-report.pdf') {
