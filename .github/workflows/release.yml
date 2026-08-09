@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run check
+      - run: npm run lint
 
   test-windows:
     if: github.event_name == 'pull_request'
@@ -35,6 +36,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run check
+      - run: npm run lint
       - name: Electron desktop startup smoke test
         timeout-minutes: 2
         run: npm run capture
@@ -58,6 +60,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
       - run: npm run release:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

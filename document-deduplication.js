@@ -82,6 +82,9 @@ export class DocumentImportCoordinator {
 
         const payload = extension === '.pdf' ? await this.extractPdfDocument(filePath) : await fs.readFile(filePath, 'utf8');
         const preview = this.parseImportedDocument(path.basename(filePath), payload, kind, accountId);
+        if (!preview.reconciled) {
+          await this.recordFailure(null, kind, extension, classifyImportCompatibility(preview));
+        }
         preview.records = preview.records.map((record) => ({
           ...record,
           sourceDocumentId: document.id,
@@ -96,7 +99,9 @@ export class DocumentImportCoordinator {
         results.push({ status, document, preview, retry: prepared.duplicate });
       } catch (error) {
         if (!document) throw error;
-        const fault = await this.recordFailure(error, kind, extension);
+        const fault = await this.recordFailure(error, kind, extension, {
+          providerFamily: 'unknown', recognitionStage: 'parser', failureCategory: 'parser_exception', reconciliationOutcome: 'not_available'
+        });
         const label = kind === 'payslip' ? 'payslip' : kind === 'credit-report' ? 'credit report' : 'bank statement';
         const reason = `We couldn't read this ${label}. Error reference: ${fault.reference}.`;
         document.parseStatus = 'needs_review';
@@ -116,4 +121,38 @@ export class DocumentImportCoordinator {
     }
     return results;
   }
+}
+
+export function classifyImportCompatibility(preview = {}) {
+  const reasonText = [...(preview.rejected || []), ...(preview.warnings || [])]
+    .map((item) => typeof item === 'string' ? item : item?.reason)
+    .filter(Boolean)
+    .join(' ');
+  const providerFamily = normaliseProviderFamily(
+    preview.summary?.provider || preview.summary?.providerFamily || preview.records?.[0]?.provider
+  );
+
+  if (/unsupported|not recognised|not recognized|layout/i.test(reasonText)) {
+    return { providerFamily, recognitionStage: 'layout_detection', failureCategory: 'unsupported_layout', reconciliationOutcome: 'failed' };
+  }
+  if (/required|missing|could not find/i.test(reasonText)) {
+    return { providerFamily, recognitionStage: 'required_fields', failureCategory: 'missing_required_fields', reconciliationOutcome: 'failed' };
+  }
+  if (/invalid|ambiguous|damaged|corrupt/i.test(reasonText)) {
+    return { providerFamily, recognitionStage: 'file_validation', failureCategory: 'invalid_input', reconciliationOutcome: 'failed' };
+  }
+  if (!preview.records?.length) {
+    return { providerFamily, recognitionStage: 'layout_detection', failureCategory: 'no_records', reconciliationOutcome: 'failed' };
+  }
+  return { providerFamily, recognitionStage: 'reconciliation', failureCategory: 'reconciliation_failed', reconciliationOutcome: 'review_required' };
+}
+
+function normaliseProviderFamily(value) {
+  const provider = String(value || '').trim().toLowerCase().replace(/[_\s]+/g, '-');
+  const aliases = {
+    'my-navy': 'mynavy', lbg: 'lloyds', 'lloyds-bank': 'lloyds', 'bank-of-scotland-plc': 'bank-of-scotland'
+  };
+  const allowed = new Set(['mynavy', 'jpa', 'experian', 'equifax', 'transunion', 'lloyds', 'halifax', 'bank-of-scotland', 'generic']);
+  const normalised = aliases[provider] || provider;
+  return allowed.has(normalised) ? normalised : 'unknown';
 }

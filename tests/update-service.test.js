@@ -181,7 +181,7 @@ test('packaged automatic check is scheduled once after the requested delay', asy
   assert.equal(harness.service.scheduleAutomaticCheck(4000, (next, wait) => { callback = next; delay = wait; }), true);
   assert.equal(delay, 4000);
   callback();
-  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => { setImmediate(resolve); });
   assert.equal(harness.updater.checkCalls, 1);
   assert.equal(harness.updater.downloadCalls, 0);
 });

@@ -89,6 +89,7 @@ Install a current Node.js release supported by Electron, then run:
 npm ci
 npm test
 npm run check
+npm run lint
 npm start
 ```
 
