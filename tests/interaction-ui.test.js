@@ -26,7 +26,7 @@ test('primary controls have explicit button behaviour and dialogs expose accessi
 
   for (const [dialogId, titleId] of [
     ['editDialog', 'editTitle'], ['importDialog', 'importTitle'], ['importResultDialog', 'importResultTitle'],
-    ['diagnosticsDialog', 'diagnosticsDialogTitle'], ['restoreDialog', 'restoreDialogTitle'], ['freshStartDialog', 'freshStartDialogTitle']
+    ['dashboardDialog', 'dashboardDialogTitle'], ['diagnosticsDialog', 'diagnosticsDialogTitle'], ['restoreDialog', 'restoreDialogTitle'], ['freshStartDialog', 'freshStartDialogTitle']
   ]) {
     assert.match(html, new RegExp(`id="${dialogId}"[^>]*aria-labelledby="${titleId}"`));
     assert.match(html, new RegExp(`id="${titleId}"`));
@@ -106,4 +106,36 @@ test('Today exposes one explainable Next Move, supporting work and a genuine cau
   assert.match(css, /\.next-move-band\.band-critical/);
   assert.match(css, /\.today-supporting-list/);
   assert.match(css, /summary:focus-visible/);
+});
+
+test('Dashboard supports persisted modes, accessible personalisation and authoritative chart summaries', async () => {
+  const [html, renderer, css] = await Promise.all([
+    fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../styles.css', import.meta.url), 'utf8')
+  ]);
+  assert.match(html, /data-view="dashboard"/);
+  assert.match(html, /id="view-dashboard"[\s\S]*id="dashboardNextMoveTitle"/);
+  assert.match(html, /data-dashboard-mode="simple"[\s\S]*data-dashboard-mode="detailed"/);
+  assert.match(html, /id="dashboardCustomisationList"/);
+  assert.match(renderer, /visibleDashboardModules\(dashboard\)/);
+  assert.match(renderer, /await saveAndRender\(\)/);
+  assert.match(renderer, /prioritySafety\?\.currentCashCapacity/);
+  assert.match(css, /\.dashboard-grid/);
+  assert.match(css, /\.dashboard-customisation-row/);
+});
+
+test('Payments charts, text alternatives and complete theme controls are present without remote assets', async () => {
+  const [html, renderer, css] = await Promise.all([
+    fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../styles.css', import.meta.url), 'utf8')
+  ]);
+  for (const id of ['moneyInOutChart', 'spendingTrendChart', 'categoryChart', 'recurringChart']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(renderer, /buildFinancialReport\(state\)/);
+  assert.match(renderer, /chartDataTable\(points\)/);
+  assert.match(html, /id="themeSelect"[\s\S]*value="system"[\s\S]*value="light"[\s\S]*value="dark"/);
+  assert.match(renderer, /matchMedia\('\(prefers-color-scheme: dark\)'\)/);
+  assert.match(css, /:root\[data-theme="dark"\]/);
+  assert.doesNotMatch(html, /https?:\/\//);
 });

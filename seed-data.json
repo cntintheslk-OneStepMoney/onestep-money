@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "meta": {
     "createdAt": "",
     "updatedAt": "",
@@ -38,6 +38,27 @@
       "weeklyDay": "monday",
       "hour": 9
     },
-    "snoozedActions": {}
+    "snoozedActions": {},
+    "appearance": {
+      "theme": "system"
+    },
+    "dashboard": {
+      "mode": "simple",
+      "order": ["next-move", "balance", "upcoming", "budget", "alerts", "progress", "spending", "income", "review", "recent"],
+      "hidden": [],
+      "pinned": ["next-move"],
+      "sizes": {
+        "next-move": "wide",
+        "balance": "standard",
+        "upcoming": "standard",
+        "budget": "standard",
+        "alerts": "standard",
+        "progress": "wide",
+        "spending": "wide",
+        "income": "standard",
+        "review": "standard",
+        "recent": "wide"
+      }
+    }
   }
 }

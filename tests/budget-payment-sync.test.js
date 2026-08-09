@@ -349,7 +349,8 @@ test('payment editing and filtering expose Income as a standard category', () =>
   const ledger = fs.readFileSync(new URL('../transaction-ledger.js', import.meta.url), 'utf8');
 
   assert.match(html, /<label>Payment category<select id="transactionCategoryFilter">/);
-  assert.match(renderer, /\['','Uncategorised'\], \[INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY\]/);
+  assert.match(renderer, /\[forFilter \? 'uncategorised' : '', 'Uncategorised'\]/);
+  assert.match(renderer, /alphabeticalOptions\(/);
   assert.match(renderer, /item\.category = INCOME_PAYMENT_CATEGORY/);
   assert.match(ledger, /category === INCOME_PAYMENT_CATEGORY_VALUE && !isIncomePayment\(item\)/);
   assert.match(renderer, /isIncomePayment\(item\) \? INCOME_PAYMENT_CATEGORY/);

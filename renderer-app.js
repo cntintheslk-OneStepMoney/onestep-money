@@ -1,8 +1,8 @@
 import {
-  ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks, calculateBudgetAnalysis,
+  ALL_TIME_PERIOD, availableReportingMonths, buildFallbackAnswer, buildFinancialChecks,
   calculatePeriodSummary, calculateStreak, createId, debtPlan, debtSafetyAssessment, exportTransactionsCsv,
   findSavingsOpportunities, formatCurrency, formatDate, hasCompletedCheckIn, INCOME_PAYMENT_CATEGORY, isIncomePayment,
-  removeBudgetCategory, reportingPeriodMonthCount, resolvePossibleDuplicate
+  periodTransactions, removeBudgetCategory, reportingPeriodMonthCount, resolvePossibleDuplicate
 } from './finance-core.js';
 import { applyCreditReportImportPlan, buildCreditReportImportPlan } from './credit-report-intelligence.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from './statement-intelligence.js';
@@ -22,6 +22,11 @@ import {
 import {
   PRIORITY_DIAGNOSTIC_CODES, prioritisedReviewGroups, prioritySnapshot, selectFiveMinuteCheckIn
 } from './next-move-priority.js';
+import { buildFinancialReport, reportTextSummary } from './financial-reporting.js';
+import {
+  compareLabels, DASHBOARD_MODULES, defaultDashboardSettings, moveDashboardModule,
+  normaliseDashboardSettings, THEMES, visibleDashboardModules
+} from './presentation-settings.js';
 
 let state;
 let encryption;
@@ -45,8 +50,10 @@ let transactionPage = 1;
 let financialViewCache = null;
 let reviewGroupsById = new Map();
 let welcomeBack = false;
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
 
 const viewMeta = {
+  dashboard: ['YOUR MONEY AT A GLANCE', 'Dashboard'],
   today: ['ONE CLEAR MOVE', 'Today'], review: ['UNFINISHED FINANCIAL WORK', 'Review Inbox'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
   debts: ['LOANS, CARDS AND FINANCE', 'Debts'], overdrafts: ['BANK BORROWING', 'Overdrafts'], budget: ['DEPENDABLE INCOME FIRST', 'Budget'],
   guide: ['PRIVATE AND LOCAL', 'Guide'], documents: ['ENCRYPTED ON THIS DEVICE', 'Documents'], settings: ['CONTROL AND PRIVACY', 'Settings']
@@ -87,6 +94,7 @@ function renderAppVersion(value) {
 function activateNormalMode(loaded) {
   state = loaded.state;
   synchroniseReviewItems(state);
+  applyTheme();
   welcomeBack = Boolean(state.meta?.updatedAt && Date.now() - Date.parse(state.meta.updatedAt) >= 3 * 86_400_000);
   encryption = loaded.encryption;
   recoveryResult = null;
@@ -296,6 +304,21 @@ function formatRecoveryDate(value) {
 function bindEvents() {
   bindRestoreEvents();
   document.querySelectorAll('.nav-button').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.view)));
+  document.querySelectorAll('[data-view-target]').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.viewTarget)));
+  byId('dashboardOpenNextMove').addEventListener('click', () => selectView('today'));
+  document.querySelectorAll('[data-dashboard-mode]').forEach((button) => button.addEventListener('click', async () => {
+    state.settings.dashboard.mode = button.dataset.dashboardMode;
+    await saveAndRender();
+    byId('dashboardStatus').textContent = `${titleCase(button.dataset.dashboardMode)} dashboard enabled.`;
+  }));
+  [byId('customiseDashboardButton'), byId('openDashboardSettingsButton')].forEach((button) => button.addEventListener('click', openDashboardCustomisation));
+  byId('dashboardCustomisationList').addEventListener('click', handleDashboardCustomisation);
+  byId('dashboardCustomisationList').addEventListener('change', handleDashboardCustomisation);
+  byId('resetDashboardButton').addEventListener('click', resetDashboard);
+  byId('themeSelect').addEventListener('change', saveThemePreference);
+  systemTheme.addEventListener('change', () => {
+    if (state?.settings?.appearance?.theme === 'system') applyTheme();
+  });
   byId('monthSelect').addEventListener('change', async () => {
     state.settings.selectedMonth = byId('monthSelect').value;
     transactionPage = 1;
@@ -334,6 +357,11 @@ function bindEvents() {
     byId('transactionCategoryFilter').value = 'uncategorised';
     selectView('transactions');
     renderTransactions();
+  });
+  byId('chartReviewUncategorisedButton').addEventListener('click', () => {
+    byId('transactionCategoryFilter').value = 'uncategorised';
+    renderTransactions();
+    focusTransactionTable();
   });
   byId('welcomeBackReviewButton').addEventListener('click', () => selectView('review'));
   byId('reviewActiveList').addEventListener('click', handleReviewAction);
@@ -426,6 +454,7 @@ function render() {
   byId('completeActionButton').textContent = pendingAction.actionLabel || 'Do it';
   byId('completeActionButton').hidden = Boolean(pendingAction.passive);
   byId('snoozeActionButton').hidden = Boolean(pendingAction.passive);
+  renderDashboard();
   renderDailyCompletion();
   renderTodaySupporting();
   byId('marginValue').textContent = formatCurrency(summary.plannedMargin);
@@ -447,6 +476,7 @@ function render() {
   renderMomentum();
   renderReviewInbox();
   renderTransactions();
+  renderPaymentInsights();
   renderPay();
   renderDebts();
   renderCreditReports();
@@ -456,6 +486,216 @@ function render() {
   renderAccounts();
   renderSettings();
   renderPrivacy();
+}
+
+function renderDashboard() {
+  const dashboard = normaliseDashboardSettings(state.settings.dashboard);
+  state.settings.dashboard = dashboard;
+  const report = getFinancialViewCache().report;
+  const visible = new Set(visibleDashboardModules(dashboard));
+  const container = byId('dashboardModules');
+  const visualOrder = [...visibleDashboardModules(dashboard), ...dashboard.order.filter((moduleId) => !visible.has(moduleId))];
+  for (const moduleId of visualOrder) {
+    const module = container.querySelector(`[data-dashboard-module="${moduleId}"]`);
+    if (!module) continue;
+    module.hidden = !visible.has(moduleId);
+    module.classList.toggle('module-wide', dashboard.sizes[moduleId] === 'wide');
+    container.append(module);
+  }
+  document.querySelectorAll('[data-dashboard-mode]').forEach((button) => {
+    const selected = button.dataset.dashboardMode === dashboard.mode;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+
+  byId('dashboardNextMoveTitle').textContent = pendingAction.title;
+  byId('dashboardNextMoveDetail').textContent = pendingAction.detail || '';
+  byId('dashboardNextMoveTime').textContent = pendingAction.timeframe || '10 min';
+  byId('dashboardNextMoveBand').textContent = pendingAction.unavailable ? 'Unavailable' : pendingAction.priorityBand ? priorityBandLabel(pendingAction.priorityBand) : 'Caught up';
+  byId('dashboardNextMoveBand').className = `next-move-band band-${pendingAction.unavailable ? 'unavailable' : pendingAction.priorityBand || 'done'}`;
+  byId('dashboardOpenNextMove').textContent = pendingAction.passive ? 'Open Today' : 'Open Next Move';
+
+  byId('dashboardBalanceValue').textContent = formatCurrency(report.accountBalance);
+  const available = prioritySafety?.currentCashCapacity ?? prioritySafety?.plannedCapacity ?? 0;
+  byId('dashboardAvailableValue').textContent = formatCurrency(available);
+  byId('dashboardCashFlowText').textContent = `${formatCurrency(report.summary.income)} in · ${formatCurrency(report.summary.spending)} out · ${formatCurrency(report.summary.netCashFlow)} net.`;
+  byId('dashboardUpcomingValue').textContent = formatCurrency(report.upcomingCommitments);
+  const payday = nextPaydayLabel(state.profile?.paydayDay);
+  byId('dashboardUpcomingText').textContent = [
+    report.upcomingCommitments > 0 ? 'Recorded commitments that are not marked paid or cancelled.' : 'No upcoming commitments recorded.',
+    payday ? `Next recorded payday: ${payday}.` : 'Add an optional payday in Settings to show the next expected income date.'
+  ].join(' ');
+  byId('dashboardBudgetValue').textContent = report.budget.remaining < 0 ? `${formatCurrency(Math.abs(report.budget.remaining))} over` : `${formatCurrency(report.budget.remaining)} left`;
+  byId('dashboardBudgetText').textContent = `${formatCurrency(report.budget.actual)} spent of ${formatCurrency(report.budget.planned)} planned. ${report.budget.coveragePercent}% categorised.`;
+  const budgetPercent = report.budget.planned > 0 ? Math.max(0, Math.min(100, Math.round((report.budget.actual / report.budget.planned) * 100))) : 0;
+  byId('dashboardBudgetProgress').style.width = `${budgetPercent}%`;
+
+  const alerts = byId('dashboardAlerts'); clear(alerts);
+  const checks = buildFinancialChecks(state).slice(0, 3);
+  for (const check of checks) {
+    const row = element('div', `dashboard-list-row tone-${check.tone}`);
+    append(row, element('strong', '', check.title), element('span', '', check.text)); alerts.append(row);
+  }
+  if (!checks.length) alerts.append(element('p', 'muted', 'No important warnings for this period.'));
+
+  renderDashboardProgress(report);
+  renderLineChart(byId('dashboardSpendingChart'), report.spendingTimeline, 'spending', 'Trusted spending over time');
+  byId('dashboardSpendingSummary').textContent = report.comparison.text;
+  renderLineChart(byId('dashboardIncomeChart'), report.incomeTimeline, 'income', 'Trusted income over time');
+  byId('dashboardIncomeSummary').textContent = report.incomeTimeline.length ? `${formatCurrency(report.summary.income)} received in the selected period.` : 'No trusted income is available for this period.';
+
+  const review = reviewInboxSummary(state);
+  byId('dashboardReviewValue').textContent = String(review.total);
+  byId('dashboardReviewText').textContent = review.total ? `${review.total} unresolved ${review.total === 1 ? 'item needs' : 'items need'} your judgement.` : 'Nothing needs review.';
+  const recent = byId('dashboardRecentPayments'); clear(recent);
+  const recentRows = periodTransactions(state.transactions, state.settings.selectedMonth).slice(-5).reverse();
+  for (const transaction of recentRows) {
+    const row = element('div', 'dashboard-list-row horizontal');
+    const direction = Number(transaction.outgoing || 0) > 0 ? -Number(transaction.outgoing) : Number(transaction.incoming || 0);
+    append(row, element('span', '', transaction.userDescription || transaction.description || 'Payment'), element('strong', direction < 0 ? 'outgoing' : 'incoming', `${direction < 0 ? '−' : '+'}${formatCurrency(Math.abs(direction))}`));
+    recent.append(row);
+  }
+  if (!recentRows.length) recent.append(element('p', 'muted', 'No trusted payments in this period.'));
+}
+
+function renderDashboardProgress(report) {
+  const container = byId('dashboardProgress'); clear(container);
+  const items = report.progress.debts.filter((item) => item.current > 0).slice(0, 4);
+  for (const item of items) {
+    const row = element('div', 'progress-item');
+    const heading = element('div', 'progress-item-heading');
+    const overdraftMilestone = item.kind === 'overdraft' && item.limit ? overdraftProgressLabel(item.current, item.limit) : '';
+    const detail = overdraftMilestone || (item.cleared === null ? `${formatCurrency(item.current)} remaining · starting balance not recorded` : `${formatCurrency(item.current)} remaining · ${formatCurrency(item.cleared)} cleared`);
+    append(heading, element('strong', '', item.name), element('span', '', detail)); row.append(heading);
+    if (item.percent !== null) {
+      const track = element('div', 'progress-track'); const bar = document.createElement('span'); bar.style.width = `${item.percent}%`; track.append(bar); row.append(track);
+    }
+    container.append(row);
+  }
+  const savings = report.progress.savings;
+  if (savings.target > 0) {
+    const row = element('div', 'progress-item');
+    const heading = element('div', 'progress-item-heading');
+    append(heading, element('strong', '', 'Emergency buffer'), element('span', '', `${formatCurrency(savings.current)} / ${formatCurrency(savings.target)}`));
+    const track = element('div', 'progress-track'); const bar = document.createElement('span'); bar.style.width = `${savings.percent}%`; track.append(bar);
+    append(row, heading, track); container.append(row);
+  }
+  if (!items.length && savings.target <= 0) container.append(element('p', 'muted', 'Add a known starting balance or savings target to show progress.'));
+  const wins = byId('dashboardWins'); clear(wins);
+  for (const message of report.wins.slice(0, 3)) wins.append(element('div', 'financial-win', `✓ ${message}`));
+}
+
+function renderPaymentInsights() {
+  const report = getFinancialViewCache().report;
+  byId('paymentInsightsSummary').textContent = reportTextSummary(report);
+  renderBarChart(byId('moneyInOutChart'), [
+    { label: 'Money in', amount: report.summary.income, tone: 'income' },
+    { label: 'Money out', amount: report.summary.spending, tone: 'spending' }
+  ], 'Money in compared with money out');
+  byId('moneyInOutSummary').textContent = `${formatCurrency(report.summary.income)} in; ${formatCurrency(report.summary.spending)} out; ${formatCurrency(report.summary.netCashFlow)} net cash flow.`;
+  renderLineChart(byId('spendingTrendChart'), report.spendingTimeline, 'spending', 'Trusted spending over time');
+  byId('spendingTrendSummary').textContent = report.comparison.text;
+  renderCategoryChart(report.categories);
+  renderBarChart(byId('recurringChart'), [
+    { label: 'Confirmed recurring', amount: report.recurring.committed, tone: 'committed' },
+    { label: 'Flexible / not confirmed', amount: report.recurring.flexible, tone: 'flexible' }
+  ], 'Confirmed recurring compared with flexible spending');
+  byId('recurringChartSummary').textContent = report.recurring.evidence === 'confirmed'
+    ? `${formatCurrency(report.recurring.committed)} is confirmed recurring; ${formatCurrency(report.recurring.flexible)} is flexible or not confirmed recurring.`
+    : 'No spending is confirmed as recurring in this period; uncertain items remain flexible rather than being labelled commitments.';
+}
+
+function renderBarChart(container, rows, ariaLabel) {
+  clear(container);
+  container.setAttribute('role', 'img');
+  container.setAttribute('aria-label', ariaLabel);
+  const max = Math.max(1, ...rows.map((row) => Math.max(0, Number(row.amount || 0))));
+  for (const item of rows) {
+    const row = element('div', 'chart-bar-row');
+    const label = element('div', 'chart-bar-label');
+    append(label, element('span', '', item.label), element('strong', '', formatCurrency(item.amount)));
+    const track = element('div', 'chart-bar-track');
+    const bar = element('span', `chart-bar-fill tone-${item.tone || 'default'}`); bar.style.width = `${Math.max(0, Number(item.amount || 0)) / max * 100}%`; track.append(bar);
+    append(row, label, track); container.append(row);
+  }
+}
+
+function renderLineChart(container, points, tone, ariaLabel) {
+  clear(container);
+  if (!points.length) { container.append(element('p', 'chart-empty', 'No trusted data for this period.')); return; }
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+  svg.setAttribute('viewBox', '0 0 600 190'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', ariaLabel);
+  const max = Math.max(1, ...points.map((point) => Math.max(0, Number(point.amount || 0))));
+  for (const y of [30, 90, 150]) {
+    const line = document.createElementNS(namespace, 'line'); line.setAttribute('x1', '26'); line.setAttribute('x2', '580'); line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y)); line.setAttribute('class', 'chart-grid-line'); svg.append(line);
+  }
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? 300 : 28 + (index / (points.length - 1)) * 548;
+    const y = 158 - (Math.max(0, Number(point.amount || 0)) / max) * 126;
+    return { ...point, x, y };
+  });
+  const line = document.createElementNS(namespace, 'polyline'); line.setAttribute('points', coordinates.map((point) => `${point.x},${point.y}`).join(' ')); line.setAttribute('class', `chart-line tone-${tone}`); svg.append(line);
+  for (const point of coordinates) {
+    const circle = document.createElementNS(namespace, 'circle'); circle.setAttribute('cx', String(point.x)); circle.setAttribute('cy', String(point.y)); circle.setAttribute('r', '5'); circle.setAttribute('class', `chart-point tone-${tone}`); circle.setAttribute('tabindex', '0');
+    const title = document.createElementNS(namespace, 'title'); title.textContent = `${shortPeriodLabel(point.label)}: ${formatCurrency(point.amount)}${point.incomplete ? ' · incomplete period' : ''}`; circle.append(title); svg.append(circle);
+  }
+  container.append(svg, chartDataTable(points));
+}
+
+function renderCategoryChart(categories) {
+  const container = byId('categoryChart'); clear(container);
+  const button = byId('chartReviewUncategorisedButton');
+  button.hidden = !categories.some((category) => category.needsReview);
+  if (!categories.length) {
+    container.append(element('p', 'chart-empty', 'No trusted spending categories for this period.'));
+    byId('categoryChartSummary').textContent = 'Income and transfers are not shown as expenditure.';
+    return;
+  }
+  const max = Math.max(1, ...categories.map((category) => Math.max(0, category.amount)));
+  for (const category of categories.slice(0, 10)) {
+    const row = element('div', `category-chart-row${category.needsReview ? ' needs-review' : ''}`);
+    const heading = element('div', 'category-chart-heading'); append(heading, element('span', '', category.label), element('strong', '', formatCurrency(category.amount)));
+    const track = element('div', 'chart-bar-track'); const bar = element('span', category.needsReview ? 'chart-bar-fill tone-warning' : 'chart-bar-fill tone-category'); bar.style.width = `${Math.max(0, category.amount) / max * 100}%`; track.append(bar);
+    append(row, heading, track); container.append(row);
+  }
+  const largest = categories[0];
+  byId('categoryChartSummary').textContent = `${largest.label} is largest at ${formatCurrency(largest.amount)}. Income, confirmed transfers and savings transfers are excluded.`;
+}
+
+function chartDataTable(points) {
+  const details = element('details', 'chart-data'); details.append(element('summary', '', 'View chart data'));
+  const table = document.createElement('table'); const head = document.createElement('thead'); const header = document.createElement('tr'); append(header, element('th', '', 'Period'), element('th', '', 'Amount')); head.append(header);
+  const body = document.createElement('tbody');
+  for (const point of points) { const row = document.createElement('tr'); append(row, cell(`${shortPeriodLabel(point.label)}${point.incomplete ? ' · incomplete' : ''}`), amountCell(point.amount)); body.append(row); }
+  append(table, head, body); details.append(table); return details;
+}
+
+function shortPeriodLabel(value) {
+  if (/^\d{4}-\d{2}$/.test(String(value))) return monthLabel(value);
+  return formatDate(value);
+}
+
+function nextPaydayLabel(value, now = new Date()) {
+  const day = knownPaydayDay(value);
+  if (!day) return '';
+  let year = now.getFullYear(); let month = now.getMonth();
+  let lastDay = new Date(year, month + 1, 0).getDate();
+  let candidate = new Date(year, month, Math.min(day, lastDay), 12);
+  if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0)) {
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+    lastDay = new Date(year, month + 1, 0).getDate();
+    candidate = new Date(year, month, Math.min(day, lastDay), 12);
+  }
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(candidate);
+}
+
+function overdraftProgressLabel(current, limit) {
+  if (current <= 0) return 'Back in credit';
+  const usage = Math.round((current / limit) * 100);
+  const milestone = usage <= 25 ? 'below 25%' : usage <= 50 ? 'below 50%' : usage <= 75 ? 'below 75%' : usage <= 100 ? 'within the arranged limit' : 'over the arranged limit';
+  return `${formatCurrency(current)} of ${formatCurrency(limit)} used · ${milestone}`;
 }
 
 function renderChecks() {
@@ -876,7 +1116,7 @@ function renderDebts() {
     planCard.append(why);
   }
   container.append(planCard);
-  for (const item of state.debts) container.append(entityCard('debt', item, [stat('Balance', formatCurrency(item.currentBalance)), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`), stat('Required / arrangement', paymentStatusLabel(item), true)]));
+  for (const item of [...state.debts].sort((left, right) => compareLabels(left.name, right.name))) container.append(entityCard('debt', item, [stat('Balance', formatCurrency(item.currentBalance)), stat('APR', item.apr == null ? 'Unknown' : `${(item.apr * 100).toFixed(2)}%`), stat('Required / arrangement', paymentStatusLabel(item), true)]));
 }
 
 function renderCreditReports() {
@@ -905,7 +1145,7 @@ function renderOverdrafts() {
     container.append(empty);
     return;
   }
-  for (const item of state.overdrafts) container.append(entityCard('overdraft', item, [stat('Used', formatCurrency(item.currentBalance)), stat('Limit / APR', limitAprLabel(item)), stat('Required / arrangement', paymentStatusLabel(item), true)]));
+  for (const item of [...state.overdrafts].sort((left, right) => compareLabels(left.name, right.name))) container.append(entityCard('overdraft', item, [stat('Used', formatCurrency(item.currentBalance)), stat('Limit / APR', limitAprLabel(item)), stat('Required / arrangement', paymentStatusLabel(item), true)]));
 }
 
 function renderBudget() {
@@ -997,7 +1237,7 @@ function renderAccounts() {
     container.append(element('p', 'muted', 'No accounts yet. Add one account to begin importing statements.'));
     return;
   }
-  for (const account of state.accounts) {
+  for (const account of [...state.accounts].sort((left, right) => compareLabels(left.name, right.name))) {
     container.append(entityCard('account', account, [
       stat('Type', titleCase(account.type || 'current')),
       stat('Balance', account.currentBalance == null ? 'Unknown' : formatCurrency(account.currentBalance)),
@@ -1013,6 +1253,7 @@ function renderSettings() {
   byId('bufferTargetInput').value = state.settings.emergencyBufferTarget;
   byId('bufferBalanceInput').value = state.settings.emergencyBufferBalance;
   byId('llmModelInput').value = state.settings.llmModel;
+  byId('themeSelect').value = state.settings.appearance.theme;
 }
 
 function renderPrivacy() {
@@ -1376,16 +1617,13 @@ function editorDefinitions(type) {
     ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
   if (type === 'transaction') return [
-    ['accountId', 'Account', 'select', state.accounts.map((account) => [account.id, account.name])], ['date', 'Date', 'date'],
+    ['accountId', 'Account', 'select', alphabeticalOptions(state.accounts.map((account) => [account.id, account.name]))], ['date', 'Date', 'date'],
     ['description', 'Statement / payment description', 'text', 'Required', 'wide-field'], ['userDescription', 'Your description', 'text', 'Optional clearer name', 'wide-field'],
     ['incoming', 'Incoming', 'number'], ['outgoing', 'Outgoing', 'number'], ['runningBalance', 'Running balance', 'number'],
-    ['budgetCategoryId', 'Payment category', 'select', [
-      ['','Uncategorised'], [INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY],
-      ...state.budgets.filter((budget) => !isIncomePayment({ category: budget.category })).map((budget) => [budget.id, budget.category])
-    ]],
+    ['budgetCategoryId', 'Payment category', 'select', paymentCategoryOptions()],
     ['category', 'Statement category label', 'text'],
     ['budgetTreatment', 'Budget treatment', 'select', [['auto','Automatic'],['spending','Spending'],['refund','Refund'],['reversal','Reversal'],['transfer','Internal transfer'],['savings_transfer','Savings transfer'],['debt_payment','Debt payment'],['ignored','Do not include']]],
-    ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']]], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
+    ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']], '', 'semantic'], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
   if (type === 'payslip') return [
     ['period', 'Pay month', 'month'], ['payDate', 'Pay date', 'date'],
@@ -1401,10 +1639,10 @@ function editorDefinitions(type) {
     ['niEmployeeYtd', 'Employee NI YTD', 'number'], ['niEmployerYtd', 'Employer NI YTD', 'number'],
     ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
-  if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']]], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
-  const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual / minimum payment','number'], ['arrearsAmount','Known arrears amount','number'], ['status','Status','select',[['unknown','Unknown'],['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']]], ['arrangementStatus','Payment arrangement','select',[['unknown','Unknown'],['none','Confirmed none'],['confirmed','Confirmed arrangement']]], ['arrangementPayment','Agreed arrangement payment','number'], ['includeInPlan','Include in payoff plan','checkbox'], ['statusConflict','Status information conflicts / needs checking','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
+  if (type === 'budget') return [['section','Section','select',[['Essentials','Essentials'],['Debt minimums','Debt minimums'],['Flexible','Flexible'],['Goals','Goals']], '', 'semantic'], ['category','Category','text'], ['planned','Planned monthly amount','number'], ['notes','Notes','textarea','','wide-field']];
+  const base = [['name','Name','text'], ['type','Type','text'], ['accountReference','Account reference / last four digits','text'], ['openedDate','Opened date','date'], ['defaultDate','Default date','date'], ['lastReportedAt','Last reported date','date'], ['currentBalance','Current balance','number'], ['aprPercent','APR (%) - leave blank if unknown','number'], ['contractualPayment','Contractual / minimum payment','number'], ['arrearsAmount','Known arrears amount','number'], ['status','Status','select',[['unknown','Unknown'],['current','Current'],['arrears','Arrears'],['defaulted','Defaulted'],['over_limit','Over limit']], '', 'semantic'], ['arrangementStatus','Payment arrangement','select',[['unknown','Unknown'],['none','Confirmed none'],['confirmed','Confirmed arrangement']], '', 'semantic'], ['arrangementPayment','Agreed arrangement payment','number'], ['includeInPlan','Include in payoff plan','checkbox'], ['statusConflict','Status information conflicts / needs checking','checkbox'], ['interestFrozen','Interest or charges frozen','checkbox'], ['description','Description','textarea','','wide-field'], ['notes','Notes','textarea','','wide-field']];
   if (type === 'overdraft') {
-    base.splice(1, 0, ['accountId', 'Linked account', 'select', [['','Not linked'], ...state.accounts.map((account) => [account.id, account.name])]]);
+    base.splice(1, 0, ['accountId', 'Linked account', 'select', [['','Not linked'], ...alphabeticalOptions(state.accounts.map((account) => [account.id, account.name]))]]);
     base.splice(8, 0, ['limit','Overdraft limit','number']);
   } else {
     base.splice(7, 0, ['originalBalance','Original balance / amount','number'], ['creditLimit','Credit limit','number']);
@@ -1413,12 +1651,13 @@ function editorDefinitions(type) {
 }
 
 function buildField(definition, item) {
-  const [name, labelText, type, options, className] = definition;
+  const [name, labelText, type, options, className, order] = definition;
   const label = element('label', className || ''); label.append(document.createTextNode(labelText));
   let input;
   if (type === 'select') {
     input = document.createElement('select');
-    for (const [value, text] of options) { const option = document.createElement('option'); option.value = value; option.textContent = text; input.append(option); }
+    const orderedOptions = order === 'semantic' ? options : alphabeticalOptions(options);
+    for (const [value, text] of orderedOptions) { const option = document.createElement('option'); option.value = value; option.textContent = text; input.append(option); }
   } else if (type === 'textarea') { input = document.createElement('textarea'); input.rows = 4; }
   else { input = document.createElement('input'); input.type = type; if (type === 'number') input.step = '0.01'; }
   input.name = name;
@@ -1850,13 +2089,86 @@ async function deleteDiagnostics() {
 
 function getFinancialViewCache() {
   if (financialViewCache?.state === state) return financialViewCache;
-  const budgetAnalysis = calculateBudgetAnalysis(state);
+  const report = buildFinancialReport(state);
+  const budgetAnalysis = report.budget;
   financialViewCache = {
     state,
+    report,
     budgetAnalysis,
     ledgerIndex: buildTransactionLedgerIndex(state, budgetAnalysis)
   };
   return financialViewCache;
+}
+
+function openDashboardCustomisation() {
+  renderDashboardCustomisation();
+  byId('dashboardDialog').showModal();
+}
+
+function renderDashboardCustomisation() {
+  const dashboard = normaliseDashboardSettings(state.settings.dashboard);
+  const container = byId('dashboardCustomisationList'); clear(container);
+  const modules = new Map(DASHBOARD_MODULES.map((module) => [module.id, module]));
+  dashboard.order.forEach((moduleId, index) => {
+    const module = modules.get(moduleId);
+    const row = element('div', 'dashboard-customisation-row');
+    const visibility = document.createElement('input'); visibility.type = 'checkbox'; visibility.checked = !dashboard.hidden.includes(moduleId); visibility.disabled = module.required; visibility.dataset.dashboardVisibility = moduleId; visibility.setAttribute('aria-label', `Show ${module.label}`);
+    const copy = element('div', 'dashboard-customisation-copy'); append(copy, element('strong', '', module.label), element('span', '', module.simple ? 'Simple and Detailed' : 'Detailed only'));
+    const pin = element('button', 'text-button', module.required ? 'Pinned' : dashboard.pinned.includes(moduleId) ? 'Unpin' : 'Pin'); pin.type = 'button'; pin.dataset.dashboardPin = moduleId; pin.disabled = module.required; pin.setAttribute('aria-pressed', String(dashboard.pinned.includes(moduleId)));
+    const size = document.createElement('select'); size.dataset.dashboardSize = moduleId; size.setAttribute('aria-label', `${module.label} size`);
+    for (const [value, label] of [['standard', 'Standard'], ['wide', 'Wide']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; size.append(option); }
+    size.value = dashboard.sizes[moduleId];
+    const controls = element('div', 'dashboard-order-controls');
+    const up = element('button', 'icon-button', '↑'); up.type = 'button'; up.dataset.dashboardMove = moduleId; up.dataset.direction = 'up'; up.disabled = index === 0; up.setAttribute('aria-label', `Move ${module.label} up`);
+    const down = element('button', 'icon-button', '↓'); down.type = 'button'; down.dataset.dashboardMove = moduleId; down.dataset.direction = 'down'; down.disabled = index === dashboard.order.length - 1; down.setAttribute('aria-label', `Move ${module.label} down`);
+    append(controls, up, down); append(row, visibility, copy, pin, size, controls); container.append(row);
+  });
+}
+
+async function handleDashboardCustomisation(event) {
+  const move = event.target.closest('[data-dashboard-move]');
+  const pin = event.target.closest('[data-dashboard-pin]');
+  const visibility = event.target.closest('[data-dashboard-visibility]');
+  const size = event.target.closest('[data-dashboard-size]');
+  if (!move && !pin && !visibility && !size) return;
+  let dashboard = normaliseDashboardSettings(state.settings.dashboard);
+  if (move) dashboard = moveDashboardModule(dashboard, move.dataset.dashboardMove, move.dataset.direction);
+  if (pin) {
+    const moduleId = pin.dataset.dashboardPin;
+    dashboard.pinned = dashboard.pinned.includes(moduleId) ? dashboard.pinned.filter((id) => id !== moduleId) : [...dashboard.pinned, moduleId];
+  }
+  if (visibility) dashboard.hidden = visibility.checked ? dashboard.hidden.filter((id) => id !== visibility.dataset.dashboardVisibility) : [...dashboard.hidden, visibility.dataset.dashboardVisibility];
+  if (size) dashboard.sizes[size.dataset.dashboardSize] = size.value;
+  state.settings.dashboard = normaliseDashboardSettings(dashboard);
+  await saveAndRender();
+  renderDashboardCustomisation();
+  byId('dashboardStatus').textContent = 'Dashboard layout saved.';
+}
+
+async function resetDashboard() {
+  if (!window.confirm('Reset the dashboard layout? Financial data, budgets, payments and review state will not change.')) return;
+  state.settings.dashboard = defaultDashboardSettings();
+  await saveAndRender();
+  renderDashboardCustomisation();
+  byId('dashboardStatus').textContent = 'Default dashboard restored. Financial data was unchanged.';
+  showToast('Dashboard reset. Your financial data was not changed.');
+}
+
+async function saveThemePreference() {
+  const theme = byId('themeSelect').value;
+  state.settings.appearance.theme = THEMES.includes(theme) ? theme : 'system';
+  applyTheme();
+  await saveState();
+  renderSettings();
+  showToast(`${titleCase(state.settings.appearance.theme)} theme saved.`);
+}
+
+function applyTheme() {
+  const preference = THEMES.includes(state?.settings?.appearance?.theme) ? state.settings.appearance.theme : 'system';
+  const resolved = preference === 'system' ? (systemTheme.matches ? 'dark' : 'light') : preference;
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themePreference = preference;
+  document.documentElement.style.colorScheme = resolved;
 }
 
 function focusTransactionTable() {
@@ -1904,7 +2216,8 @@ function populateAccountOptions() {
   for (const id of ['statementAccountSelect', 'transactionAccountFilter']) {
     const select = byId(id); const preserveAll = id === 'transactionAccountFilter'; clear(select);
     if (preserveAll) { const all = document.createElement('option'); all.value = 'all'; all.textContent = 'All accounts'; select.append(all); }
-    for (const account of state.accounts.filter((item) => item.active !== false)) { const option = document.createElement('option'); option.value = account.id; option.textContent = account.name; select.append(option); }
+    const accounts = state.accounts.filter((item) => item.active !== false).sort((left, right) => compareLabels(left.name, right.name));
+    for (const account of accounts) { const option = document.createElement('option'); option.value = account.id; option.textContent = account.name; select.append(option); }
   }
 }
 
@@ -1913,13 +2226,22 @@ function populatePaymentCategoryOptions() {
   if (!select) return;
   const selected = select.value || 'all';
   clear(select);
-  for (const [value, label] of [
-    ['all', 'All categories'], ['uncategorised', 'Uncategorised'], [INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY],
-    ...state.budgets.filter((budget) => !isIncomePayment({ category: budget.category })).map((budget) => [budget.id, budget.category])
-  ]) {
+  for (const [value, label] of [['all', 'All categories'], ...paymentCategoryOptions(true)]) {
     const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option);
   }
   select.value = [...select.options].some((option) => option.value === selected) ? selected : 'all';
+}
+
+function paymentCategoryOptions(forFilter = false) {
+  return alphabeticalOptions([
+    [forFilter ? 'uncategorised' : '', 'Uncategorised'],
+    [INCOME_PAYMENT_CATEGORY_VALUE, INCOME_PAYMENT_CATEGORY],
+    ...state.budgets.filter((budget) => !isIncomePayment({ category: budget.category })).map((budget) => [budget.id, budget.category])
+  ]);
+}
+
+function alphabeticalOptions(options) {
+  return [...options].sort((left, right) => compareLabels(left[1], right[1]));
 }
 
 function transactionEditorItem(transaction) {
