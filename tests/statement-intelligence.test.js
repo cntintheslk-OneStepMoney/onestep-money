@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   detectRecurringTransactions, findDuplicateCandidates, matchInternalTransfers,
-  matchStatementAccount, syncStatementAccount
+  isTransactionFinanciallyActive, matchStatementAccount, syncStatementAccount
 } from '../finance-core.js';
 import { applyStatementImportPlan, buildStatementImportPlan } from '../statement-intelligence.js';
+import { activeReviewItems, resolveReviewItem } from '../review-lifecycle.js';
 
 const transaction = (overrides = {}) => ({
   id: overrides.id || `transaction-${Math.random()}`,
@@ -84,6 +85,8 @@ test('possible duplicate imports are retained with pending inactive review state
   assert.equal(possible.sourceDocumentId, 'document-1');
   assert.equal(possible.recurring, false);
   assert.equal(possible.transferStatus, 'no');
+  assert.equal(possible.duplicateCandidateId, 'existing');
+  assert.equal(applied.state.reviewItems.filter((item) => item.type === 'possible_duplicate' && item.status === 'needs_attention').length, 1);
 });
 
 test('provider transaction identifiers provide exact duplicate evidence', () => {
@@ -228,6 +231,13 @@ test('unreconciled statements can add reviewed transactions without changing acc
   assert.equal(applied.state.transactions.length, 1);
   assert.equal(applied.state.accounts[0].currentBalance, 100);
   assert.equal(applied.result.balanceAction, '');
+  assert.equal(applied.state.transactions[0].importReviewStatus, 'pending');
+  assert.equal(isTransactionFinanciallyActive(applied.state.transactions[0]), false);
+  const review = activeReviewItems(applied.state).find((item) => item.type === 'import_conflict');
+  assert.ok(review);
+  resolveReviewItem(applied.state, review.id, 'apply_import');
+  assert.equal(applied.state.transactions[0].importReviewStatus, 'accepted');
+  assert.equal(isTransactionFinanciallyActive(applied.state.transactions[0]), true);
 });
 
 test('foreign-currency statement is review-only for a GBP profile', () => {

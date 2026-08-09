@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "meta": {
     "createdAt": "",
     "updatedAt": "",
@@ -10,7 +10,7 @@
     "locale": "en-GB",
     "currency": "GBP",
     "dependableIncome": 0,
-    "paydayDay": 30
+    "paydayDay": null
   },
   "accounts": [],
   "transactions": [],
@@ -25,6 +25,7 @@
   "tasks": [],
   "checkIns": [],
   "importBatches": [],
+  "reviewItems": [],
   "settings": {
     "selectedMonth": "",
     "extraDebtPayment": 0,

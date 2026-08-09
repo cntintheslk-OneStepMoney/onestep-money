@@ -13,7 +13,7 @@ for (const file of javascript) {
 }
 
 const seed = JSON.parse(fs.readFileSync(path.join(root, 'seed-data.json'), 'utf8'));
-const emptyCollections = ['accounts', 'transactions', 'payslips', 'taxDocuments', 'creditReports', 'debts', 'overdrafts', 'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches'];
+const emptyCollections = ['accounts', 'transactions', 'payslips', 'taxDocuments', 'creditReports', 'debts', 'overdrafts', 'budgets', 'scheduledPayments', 'documents', 'tasks', 'checkIns', 'importBatches', 'reviewItems'];
 for (const collection of emptyCollections) {
   if (!Array.isArray(seed[collection]) || seed[collection].length) throw new Error(`Public seed ${collection} must be an empty array.`);
 }
@@ -27,6 +27,7 @@ if (packageJson.name !== 'onestep-money' || packageJson.build?.productName !== '
 if (!packageJson.dependencies?.['electron-updater']) throw new Error('The installed update channel is not configured.');
 if (!packageJson.build?.files?.includes('diagnostic-logger.js')) throw new Error('The diagnostic logger is missing from packaged builds.');
 if (!packageJson.build?.files?.includes('transaction-ledger.js')) throw new Error('The paginated transaction ledger is missing from packaged builds.');
+if (!packageJson.build?.files?.includes('review-lifecycle.js')) throw new Error('The persisted review lifecycle is missing from packaged builds.');
 if (packageJson.scripts?.lint !== 'eslint .') throw new Error('The correctness-focused static analysis command is not configured.');
 
 console.log(JSON.stringify({ javascriptFiles: javascript.length, seedCollections: emptyCollections.length, package: packageJson.name, version: packageJson.version }));

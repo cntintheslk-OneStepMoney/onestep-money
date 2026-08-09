@@ -15,6 +15,10 @@ import {
   buildTransactionLedgerIndex, filterTransactionLedger, INCOME_PAYMENT_CATEGORY_VALUE,
   paginateTransactionLedger
 } from './transaction-ledger.js';
+import {
+  knownPaydayDay, resolveReviewItem, reviewInboxSummary, reviewItemPresentation, reviewRoute,
+  selectCheckInReviewItems, snoozeReviewGroup, snoozeReviewItem, startReviewItem, synchroniseReviewItems
+} from './review-lifecycle.js';
 
 let state;
 let encryption;
@@ -34,9 +38,11 @@ let recoveryEventsBound = false;
 let restoreEventsBound = false;
 let transactionPage = 1;
 let financialViewCache = null;
+let reviewGroupsById = new Map();
+let welcomeBack = false;
 
 const viewMeta = {
-  today: ['ONE CLEAR MOVE', 'Today'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
+  today: ['ONE CLEAR MOVE', 'Today'], review: ['UNFINISHED FINANCIAL WORK', 'Review Inbox'], transactions: ['MONEY IN AND OUT', 'Payments'], pay: ['WHERE GROSS PAY GOES', 'Pay'],
   debts: ['LOANS, CARDS AND FINANCE', 'Debts'], overdrafts: ['BANK BORROWING', 'Overdrafts'], budget: ['DEPENDABLE INCOME FIRST', 'Budget'],
   guide: ['PRIVATE AND LOCAL', 'Guide'], documents: ['ENCRYPTED ON THIS DEVICE', 'Documents'], settings: ['CONTROL AND PRIVACY', 'Settings']
 };
@@ -75,6 +81,8 @@ function renderAppVersion(value) {
 
 function activateNormalMode(loaded) {
   state = loaded.state;
+  synchroniseReviewItems(state);
+  welcomeBack = Boolean(state.meta?.updatedAt && Date.now() - Date.parse(state.meta.updatedAt) >= 3 * 86_400_000);
   encryption = loaded.encryption;
   recoveryResult = null;
   freshStartToken = null;
@@ -322,6 +330,10 @@ function bindEvents() {
     selectView('transactions');
     renderTransactions();
   });
+  byId('welcomeBackReviewButton').addEventListener('click', () => selectView('review'));
+  byId('reviewActiveList').addEventListener('click', handleReviewAction);
+  byId('reviewSnoozedList').addEventListener('click', handleReviewAction);
+  byId('checkInReviewList').addEventListener('click', handleReviewAction);
   byId('payslipList').addEventListener('click', handleEditClick);
   byId('documentCards').addEventListener('click', handleDocumentClick);
   byId('accountCards').addEventListener('click', handleEditClick);
@@ -369,6 +381,7 @@ function selectView(name) {
 }
 
 function render() {
+  synchroniseReviewItems(state);
   populateMonthOptions();
   populatePaymentCategoryOptions();
   const month = state.settings.selectedMonth;
@@ -377,6 +390,7 @@ function render() {
   byId('nextActionTitle').textContent = pendingAction.title;
   byId('nextActionDetail').textContent = pendingAction.detail || '';
   byId('nextActionTime').textContent = pendingAction.timeframe || '10 min';
+  byId('completeActionButton').textContent = pendingAction.reviewId && !pendingAction.completeDirect ? 'Review now' : 'Complete & finish';
   byId('completeActionButton').hidden = Boolean(pendingAction.passive);
   byId('snoozeActionButton').hidden = Boolean(pendingAction.passive);
   renderDailyCompletion();
@@ -397,6 +411,7 @@ function render() {
   byId('streakValue').textContent = calculateStreak(state.checkIns);
   renderChecks();
   renderMomentum();
+  renderReviewInbox();
   renderTransactions();
   renderPay();
   renderDebts();
@@ -429,9 +444,22 @@ function renderMomentum() {
   byId('momentumText').textContent = current ? `${formatCurrency(current)} saved toward ${formatCurrency(target)}. Keep the target small while payments are being stabilised.` : 'Your first win is a completed check-in. The buffer can grow after essential payments are secure.';
   byId('quickCheckInButton').disabled = completedToday;
   byId('quickCheckInButton').textContent = completedToday ? 'Check-in complete today' : 'Complete five-minute check-in';
+  const reviewSelection = selectCheckInReviewItems(state);
+  const reviewList = byId('checkInReviewList'); clear(reviewList);
+  for (const item of reviewSelection) {
+    const presentation = reviewItemPresentation(item, state);
+    const row = element('div', 'check-in-review-item');
+    const label = element('strong', '', presentation.title);
+    const button = element('button', 'secondary-button', 'Open');
+    button.type = 'button'; button.dataset.reviewRoute = item.id;
+    button.setAttribute('aria-label', `Open ${presentation.title}`);
+    append(row, label, button); reviewList.append(row);
+  }
+  reviewList.hidden = reviewSelection.length === 0;
   byId('checkInStatus').textContent = completedToday
-    ? 'Recorded for today. There is nothing else you need to tick off.'
-    : 'Use this when you reviewed your money but did not finish the action above.';
+    ? 'Recorded for today. Unresolved review work remains available in the Review Inbox.'
+    : reviewSelection.length ? `A manageable ${reviewSelection.length} ${reviewSelection.length === 1 ? 'item is' : 'items are'} ready if you want to use the check-in.`
+      : 'Nothing needs reviewing. A quick check-in is enough.';
 }
 
 function renderDailyCompletion() {
@@ -439,6 +467,195 @@ function renderDailyCompletion() {
   document.querySelector('.focus-panel').hidden = completedToday;
   document.querySelector('.permission-slip').hidden = completedToday;
   byId('dailyCompleteState').hidden = !completedToday;
+}
+
+function renderReviewInbox() {
+  const summary = reviewInboxSummary(state);
+  reviewGroupsById = new Map(summary.groups.map((group) => [group.id, group]));
+  const count = byId('reviewNavCount');
+  count.textContent = String(summary.total);
+  count.hidden = summary.total === 0;
+  count.setAttribute('aria-label', `${summary.total} active review ${summary.total === 1 ? 'item' : 'items'}`);
+  byId('reviewSummaryTitle').textContent = summary.total
+    ? `${summary.total} ${summary.total === 1 ? 'thing needs' : 'things need'} attention`
+    : 'Nothing needs reviewing right now';
+  byId('reviewSummaryText').textContent = summary.total
+    ? 'Start with important work. Open details only when you need them.'
+    : 'OneStep will put work here only when a decision or correction is genuinely needed.';
+  byId('reviewImportantCount').textContent = summary.important;
+  byId('reviewNormalCount').textContent = summary.normal + summary.low;
+  byId('reviewSnoozedCount').textContent = summary.snoozed.length;
+  byId('reviewDoneState').hidden = summary.total !== 0;
+  byId('reviewActiveSection').hidden = summary.total === 0;
+  byId('reviewInboxStatus').textContent = summary.total ? `${summary.total} review items are active.` : 'Nothing needs reviewing right now.';
+
+  const activeList = byId('reviewActiveList'); clear(activeList);
+  for (const group of summary.groups) activeList.append(reviewGroupCard(group));
+
+  const snoozedSection = byId('reviewSnoozedSection');
+  const snoozedList = byId('reviewSnoozedList'); clear(snoozedList);
+  snoozedSection.hidden = summary.snoozed.length === 0;
+  for (const item of summary.snoozed) snoozedList.append(snoozedReviewCard(item));
+
+  const welcomePanel = byId('welcomeBackPanel');
+  welcomePanel.hidden = !(welcomeBack && summary.total > 0);
+  if (!welcomePanel.hidden) byId('welcomeBackText').textContent = `${Math.min(3, summary.total)} ${summary.total === 1 ? 'thing is' : 'things are'} worth checking. You do not need to catch up on everything.`;
+}
+
+function reviewGroupCard(group) {
+  const presentation = group.presentation;
+  const card = element('article', `review-card priority-${group.priority}`);
+  card.dataset.reviewGroup = group.id;
+  const copy = element('div', 'review-card-copy');
+  const heading = element('div', 'review-card-heading');
+  append(heading, element('h3', '', presentation.title), element('span', 'review-priority', group.priority === 'high' ? 'Important' : 'Normal'));
+  append(copy, heading, element('p', 'review-card-detail', presentation.detail));
+  const explanation = element('details', 'review-explanation');
+  explanation.append(element('summary', '', 'Why does this need review?'));
+  explanation.append(element('p', '', `${presentation.why} ${presentation.consequence}`));
+  copy.append(explanation);
+  if (group.type === 'uncategorised_payment' && group.items.length > 1) copy.append(reviewGroupDetails(group));
+
+  const actions = element('div', 'review-card-actions');
+  const open = element('button', 'primary-button', presentation.action);
+  open.type = 'button'; open.dataset.reviewRoute = group.items[0].id;
+  actions.append(open);
+  if (group.type === 'possible_duplicate') actions.append(reviewDecisionRow(group.items[0]));
+  if (group.type === 'import_conflict') {
+    const item = group.items[0];
+    const batch = item.sourceType === 'importBatch' ? state.importBatches.find((entry) => String(entry.id) === item.sourceId) : null;
+    if (batch?.kind === 'statement') {
+      const decisions = element('div', 'review-decision-row');
+      const apply = element('button', 'secondary-button', 'Apply payments');
+      apply.type = 'button'; apply.dataset.reviewDecision = 'apply_import'; apply.dataset.reviewItem = item.id;
+      const keep = element('button', 'secondary-button', 'Reject changes');
+      keep.type = 'button'; keep.dataset.reviewDecision = 'keep_current'; keep.dataset.reviewItem = item.id;
+      append(decisions, apply, keep); actions.append(decisions);
+    } else {
+      const keep = element('button', 'secondary-button', item.sourceType === 'document' ? 'Keep document only' : 'Keep current data');
+      keep.type = 'button'; keep.dataset.reviewDecision = item.sourceType === 'document' ? 'ignore_import' : 'keep_current'; keep.dataset.reviewItem = item.id;
+      actions.append(keep);
+    }
+  }
+  actions.append(reviewSnoozeControls(group));
+  append(card, copy, actions);
+  return card;
+}
+
+function reviewGroupDetails(group) {
+  const details = element('details', 'review-group-items');
+  details.append(element('summary', '', `Show ${group.items.length} payments`));
+  for (const item of group.items.slice(0, 100)) {
+    const presentation = reviewItemPresentation(item, state);
+    const row = element('div', 'review-group-row');
+    const button = element('button', 'secondary-button', 'Categorise');
+    button.type = 'button'; button.dataset.reviewRoute = item.id;
+    append(row, element('span', '', presentation.detail), button); details.append(row);
+  }
+  if (group.items.length > 100) details.append(element('p', 'muted', `Showing the first 100 of ${group.items.length}. Use Payments to work through the complete group.`));
+  return details;
+}
+
+function reviewDecisionRow(item) {
+  const row = element('div', 'review-decision-row');
+  const genuine = element('button', 'secondary-button', 'Both genuine');
+  genuine.type = 'button'; genuine.dataset.reviewDecision = 'both_genuine'; genuine.dataset.reviewItem = item.id;
+  const duplicate = element('button', 'secondary-button', 'Duplicate');
+  duplicate.type = 'button'; duplicate.dataset.reviewDecision = 'duplicate'; duplicate.dataset.reviewItem = item.id;
+  append(row, genuine, duplicate); return row;
+}
+
+function reviewSnoozeControls(group) {
+  const controls = element('div', 'review-snooze-controls');
+  const select = document.createElement('select');
+  select.className = 'review-snooze-choice'; select.setAttribute('aria-label', `Snooze ${group.presentation.title}`);
+  for (const [value, label] of [['tomorrow', 'Tomorrow'], ['weekend', 'This weekend'], ['next_week', 'Next week']]) {
+    const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option);
+  }
+  const payday = document.createElement('option'); payday.value = 'payday'; payday.textContent = knownPaydayDay(state.profile?.paydayDay) ? 'Payday' : 'Payday · not known'; payday.disabled = !knownPaydayDay(state.profile?.paydayDay); select.append(payday);
+  const button = element('button', 'secondary-button', 'Snooze');
+  button.type = 'button'; button.dataset.reviewSnooze = group.id;
+  append(controls, select, button); return controls;
+}
+
+function snoozedReviewCard(item) {
+  const presentation = reviewItemPresentation(item, state);
+  const card = element('article', 'review-card');
+  const copy = element('div', 'review-card-copy');
+  append(copy, element('h3', '', presentation.title), element('p', 'review-card-detail', presentation.detail), element('span', 'review-due', `Returns ${formatReviewDate(item.snoozedUntil)}`));
+  const actions = element('div', 'review-card-actions');
+  const button = element('button', 'secondary-button', 'Review now'); button.type = 'button'; button.dataset.reviewRoute = item.id;
+  actions.append(button); append(card, copy, actions); return card;
+}
+
+async function handleReviewAction(event) {
+  const decision = event.target.closest('[data-review-decision]');
+  if (decision) {
+    const confirmations = {
+      duplicate: 'Confirm these records are the same transaction. The reviewed payment will remain excluded from trusted totals.',
+      both_genuine: 'Confirm both payments are legitimate. The reviewed payment will be included in trusted totals.',
+      apply_import: 'Apply these reviewed statement payments to trusted totals? The protected account balance will not be guessed.',
+      keep_current: 'Keep the current trusted data and reject the uncertain imported change?',
+      ignore_import: 'Keep the encrypted document without importing its uncertain financial information?'
+    };
+    if (!window.confirm(confirmations[decision.dataset.reviewDecision] || 'Confirm this review decision?')) return;
+    const labels = { duplicate: 'Payment confirmed as a duplicate.', both_genuine: 'Both payments confirmed as genuine.', apply_import: 'Reviewed payments added to trusted totals.', keep_current: 'Current trusted financial data kept.', ignore_import: 'Document kept without importing uncertain information.' };
+    resolveReviewItem(state, decision.dataset.reviewItem, decision.dataset.reviewDecision);
+    await saveState(); render(); showToast(labels[decision.dataset.reviewDecision] || 'Review item resolved.');
+    return;
+  }
+  const snooze = event.target.closest('[data-review-snooze]');
+  if (snooze) {
+    const group = reviewGroupsById.get(snooze.dataset.reviewSnooze);
+    const choice = snooze.closest('.review-card').querySelector('.review-snooze-choice').value;
+    snoozeReviewGroup(state, group.items.map((item) => item.id), choice);
+    await saveState(); render(); showToast('Review work snoozed. It will return automatically.');
+    return;
+  }
+  const routeButton = event.target.closest('[data-review-route]');
+  if (routeButton) await openReviewWorkflow(routeButton.dataset.reviewRoute);
+}
+
+async function openReviewWorkflow(itemId) {
+  const item = state.reviewItems.find((entry) => entry.id === itemId);
+  if (!item || item.status === 'resolved') { render(); showToast('That review work is already complete.'); return; }
+  startReviewItem(state, itemId);
+  await saveState();
+  const route = reviewRoute(item, state);
+  if (route.type === 'transaction') {
+    const transaction = state.transactions.find((entry) => String(entry.id) === route.id);
+    if (item.type === 'uncategorised_payment') {
+      selectView('transactions'); openEditor('transaction', route.id, { reviewItemId: item.id });
+      return;
+    }
+    state.settings.selectedMonth = ALL_TIME_PERIOD;
+    byId('transactionSearch').value = transaction?.userDescription || transaction?.description || '';
+    transactionPage = 1; populateMonthOptions(); selectView('transactions'); renderTransactions(); focusTransactionTable();
+    return;
+  }
+  if (route.type === 'debt' || route.type === 'overdraft') {
+    selectView(route.view); openEditor(route.type, route.id, { reviewItemId: item.id });
+    return;
+  }
+  if (route.type === 'import') {
+    selectView(route.view);
+    byId(route.controlId)?.focus();
+    showToast('Choose the correct account where needed, then select the original document again.');
+    return;
+  }
+  if (route.type === 'importBatch' && route.view === 'transactions') {
+    state.settings.selectedMonth = ALL_TIME_PERIOD;
+    byId('transactionSearch').value = '';
+    byId('transactionCategoryFilter').value = 'all';
+    transactionPage = 1; populateMonthOptions(); selectView('transactions'); renderTransactions(); focusTransactionTable();
+    return;
+  }
+  selectView(route.view);
+}
+
+function formatReviewDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'later' : new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 function renderTransactions() {
@@ -473,6 +690,8 @@ function renderTransactions() {
           : 'possible duplicate · excluded pending review';
       badges.textContent += ` · ${duplicateLabel}`;
     }
+    if (item.importReviewStatus === 'pending') badges.textContent += ' · import review pending · excluded from trusted totals';
+    if (item.importReviewStatus === 'rejected') badges.textContent += ' · rejected import · excluded from trusted totals';
     description.append(badges);
     row.append(description);
     row.append(amountCell(item.incoming, 'incoming'));
@@ -687,6 +906,7 @@ function renderAccounts() {
 
 function renderSettings() {
   byId('dependableIncomeInput').value = state.profile.dependableIncome;
+  byId('paydayDayInput').value = knownPaydayDay(state.profile.paydayDay) || '';
   byId('extraPaymentInput').value = state.settings.extraDebtPayment;
   byId('bufferTargetInput').value = state.settings.emergencyBufferTarget;
   byId('bufferBalanceInput').value = state.settings.emergencyBufferBalance;
@@ -787,7 +1007,8 @@ function syncConfirmImportButton() {
   button.disabled = preview.kind === 'statement'
     ? !currentImport.statementPlan.canApply
     : preview.kind === 'credit-report' ? !currentImport.creditPlan.canApply : !preview.records.length;
-  button.textContent = preview.kind === 'credit-report' ? 'Apply reviewed credit report' : 'Import reviewed records';
+  button.textContent = preview.kind === 'credit-report' ? 'Apply reviewed credit report'
+    : preview.kind === 'statement' && !preview.reconciled ? 'Store for Review Inbox' : 'Import reviewed records';
 }
 
 function renderImportPreview(preview) {
@@ -899,6 +1120,7 @@ function statementRecordActionLabel(plan) {
 }
 
 function statementCompletionMessage(result) {
+  if (result.awaitingImportReview) return `Statement stored. ${result.added} payment${result.added === 1 ? '' : 's'} remain outside trusted totals until you apply or reject them in Review Inbox.`;
   const balance = result.balanceAction === 'overdraft-created'
     ? ' Account balance updated and its overdraft added.'
     : result.balanceAction === 'overdraft-updated' ? ' Account and overdraft balances updated.'
@@ -956,6 +1178,19 @@ function renderCreditReportChanges(plan) {
 
 async function completeNextAction() {
   if (hasCompletedCheckIn(state.checkIns)) return;
+  if (pendingAction.reviewId) {
+    if (pendingAction.completeDirect) {
+      const item = state.reviewItems.find((entry) => entry.id === pendingAction.reviewId);
+      const task = state.tasks.find((entry) => String(entry.id) === item?.sourceId);
+      if (task) task.completedAt = new Date().toISOString();
+      synchroniseReviewItems(state);
+      state.checkIns.push({ id: createId('checkin'), date: new Date().toISOString(), completed: true, kind: 'action', actionId: item?.sourceId, note: pendingAction.title });
+      await saveState(); render(); showToast('Today is complete. You can close the app now.');
+      return;
+    }
+    await openReviewWorkflow(pendingAction.reviewId);
+    return;
+  }
   const blocker = actionCompletionBlocker(pendingAction);
   if (blocker) {
     byId('nextActionDetail').textContent = blocker;
@@ -983,6 +1218,14 @@ function actionCompletionBlocker(action) {
 }
 
 async function snoozeNextAction() {
+  if (pendingAction.reviewId) {
+    snoozeReviewItem(state, pendingAction.reviewId, 'tomorrow');
+    await saveState();
+    await animateFocusPanel('is-switching', 180);
+    render();
+    showToast('Snoozed until tomorrow. Here is your next available step.');
+    return;
+  }
   const task = state.tasks.find((item) => item.id === pendingAction.id);
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -1032,7 +1275,10 @@ async function handleEditClick(event) {
     const decision = review.dataset.duplicateReview;
     const label = decision === 'accepted' ? 'include this payment in trusted financial totals' : 'keep this payment excluded as a duplicate';
     if (!window.confirm(`Confirm that OneStep should ${label}?`)) return;
-    const next = resolvePossibleDuplicate(state, review.dataset.id, decision);
+    const item = state.reviewItems.find((entry) => entry.type === 'possible_duplicate' && entry.sourceId === review.dataset.id && entry.status !== 'resolved');
+    const next = item
+      ? resolveReviewItem(state, item.id, decision === 'accepted' ? 'both_genuine' : 'duplicate')
+      : resolvePossibleDuplicate(state, review.dataset.id, decision);
     await saveState(next);
     render();
     showToast(decision === 'accepted' ? 'Payment accepted and included in financial totals.' : 'Duplicate confirmed and kept out of financial totals.');
@@ -1042,8 +1288,8 @@ async function handleEditClick(event) {
   if (button) openEditor(button.dataset.edit, button.dataset.id);
 }
 
-function openEditor(type, id = '') {
-  editorContext = { type, id };
+function openEditor(type, id = '', context = {}) {
+  editorContext = { type, id, ...context };
   const collection = collectionFor(type);
   const item = id ? state[collection].find((entry) => entry.id === id) : null;
   const editorItem = type === 'transaction' && item
@@ -1177,7 +1423,13 @@ async function saveEditor(event) {
       if (!transaction.budgetCategoryId && transaction.categorySource !== 'manual' && normalisedText(transaction.category) === normalisedText(previousBudgetCategory)) transaction.budgetCategoryId = item.id;
     }
   }
-  if (type === 'debt' || type === 'overdraft') { item.updatedAt = new Date().toISOString(); item.planPriority ??= 999; item.arrangementConfirmed = item.arrangementStatus === 'confirmed'; }
+  if (type === 'debt' || type === 'overdraft') {
+    item.updatedAt = new Date().toISOString(); item.planPriority ??= 999; item.arrangementConfirmed = item.arrangementStatus === 'confirmed';
+    if (editorContext.reviewItemId && item.statusConflict === false) {
+      item.reviewedReportedStatus = item.reportedStatus || '';
+      item.statusReviewedAt = item.updatedAt;
+    }
+  }
   if (type === 'account') { item.name ||= 'Unnamed account'; item.active ??= true; }
   await saveState();
   if (type === 'account') populateAccountOptions();
@@ -1259,6 +1511,7 @@ async function checkModel() {
 
 async function saveSettings() {
   state.profile.dependableIncome = Number(byId('dependableIncomeInput').value || 0);
+  state.profile.paydayDay = knownPaydayDay(byId('paydayDayInput').value);
   state.settings.extraDebtPayment = Number(byId('extraPaymentInput').value || 0);
   state.settings.emergencyBufferTarget = Number(byId('bufferTargetInput').value || 0);
   state.settings.emergencyBufferBalance = Number(byId('bufferBalanceInput').value || 0);
@@ -1554,6 +1807,7 @@ function focusTransactionTable() {
 async function saveAndRender() { await saveState(); render(); }
 async function saveState(nextState = state) {
   synchroniseSelectedMonth(nextState);
+  synchroniseReviewItems(nextState);
   const saved = await window.financeAPI.saveState(nextState);
   if (saved?.status === 'blocked') throw new Error(saved.message || 'Saving is paused while recovery is required.');
   if (saved?.status === 'conflict') {
