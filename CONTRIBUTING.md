@@ -8,9 +8,10 @@ Thank you for improving OneStep Money.
 npm ci
 npm test
 npm run check
+npm run lint
 ```
 
-The privacy check must pass. Never commit real or realistic personal finance records, bank statements, payslips, credit reports, backups, vault files, access tokens or screenshots containing financial data.
+The correctness-focused lint and privacy checks must pass. Never commit real or realistic personal finance records, bank statements, payslips, credit reports, backups, vault files, access tokens or screenshots containing financial data.
 
 Use clearly fictional values in tests. Keep financial guidance conservative and preserve this safety order:
 

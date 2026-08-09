@@ -26,6 +26,8 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 
 if (packageJson.name !== 'onestep-money' || packageJson.build?.productName !== 'OneStep Money') throw new Error('Package branding is inconsistent.');
 if (!packageJson.dependencies?.['electron-updater']) throw new Error('The installed update channel is not configured.');
 if (!packageJson.build?.files?.includes('diagnostic-logger.js')) throw new Error('The diagnostic logger is missing from packaged builds.');
+if (!packageJson.build?.files?.includes('transaction-ledger.js')) throw new Error('The paginated transaction ledger is missing from packaged builds.');
+if (packageJson.scripts?.lint !== 'eslint .') throw new Error('The correctness-focused static analysis command is not configured.');
 
 console.log(JSON.stringify({ javascriptFiles: javascript.length, seedCollections: emptyCollections.length, package: packageJson.name, version: packageJson.version }));
 
