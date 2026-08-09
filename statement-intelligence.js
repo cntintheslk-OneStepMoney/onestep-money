@@ -2,6 +2,7 @@ import {
   createId, detectRecurringTransactions, findDuplicateCandidates, matchInternalTransfers,
   isTransactionFinanciallyActive, matchStatementAccount, syncStatementAccount
 } from './finance-core.js';
+import { synchroniseReviewItems } from './review-lifecycle.js';
 
 export function buildStatementImportPlan(state, preview, documentId = '') {
   if (preview?.kind !== 'statement') throw new Error('Statement Intelligence only accepts bank-statement previews.');
@@ -12,7 +13,7 @@ export function buildStatementImportPlan(state, preview, documentId = '') {
   const possibleIds = new Set(duplicates.possible.map((item) => item.incoming.id));
   const newRecords = (preview.records || []).filter((record) => !exactIds.has(record.id));
   const trustedHistory = (state.transactions || []).filter(isTransactionFinanciallyActive);
-  const trustedNewRecords = newRecords.filter((record) => !possibleIds.has(record.id));
+  const trustedNewRecords = preview.reconciled ? newRecords.filter((record) => !possibleIds.has(record.id)) : [];
   const recurring = detectRecurringTransactions(trustedHistory, trustedNewRecords);
   const transferMatches = matchInternalTransfers([...trustedHistory, ...trustedNewRecords], accounts)
     .filter((match) => trustedNewRecords.some((record) => record.id === match.debitId || record.id === match.creditId));
@@ -71,6 +72,7 @@ export function applyStatementImportPlan(state, preview, reviewedPlan, documentI
   next.overdrafts ||= [];
   const recurringById = new Map(currentPlan.recurring.map((item) => [item.transactionId, item]));
   const possibleIds = new Set(currentPlan.duplicates.possible.map((item) => item.incoming.id));
+  const possibleMatches = new Map(currentPlan.duplicates.possible.map((item) => [item.incoming.id, item.existing.id]));
   const addedIds = new Set();
   for (const duplicate of currentPlan.duplicates.exact) {
     const existing = next.transactions.find((item) => item.id === duplicate.existing.id);
@@ -85,7 +87,9 @@ export function applyStatementImportPlan(state, preview, reviewedPlan, documentI
       sourceDocumentIds: [...new Set([...(record.sourceDocumentIds || []), documentId || record.sourceDocumentId].filter(Boolean))],
       duplicateStatus: possibleIds.has(record.id) ? 'possible' : 'none',
       reviewStatus: possibleIds.has(record.id) ? 'pending' : 'not_required',
-      financiallyActive: !possibleIds.has(record.id),
+      importReviewStatus: preview.reconciled ? 'trusted' : 'pending',
+      financiallyActive: Boolean(preview.reconciled) && !possibleIds.has(record.id),
+      duplicateCandidateId: possibleMatches.get(record.id) || '',
       recurring: record.recurring || observation?.confidence === 'confirmed',
       recurringObservation: observation || null
     });
@@ -113,14 +117,15 @@ export function applyStatementImportPlan(state, preview, reviewedPlan, documentI
     accountId: account.id
   });
   return {
-    state: next,
+    state: synchroniseReviewItems(next, new Date(importedAt)),
     result: {
       added: currentPlan.newRecords.length,
       alreadyKnown: currentPlan.counts.alreadyKnown,
       needsReview: currentPlan.counts.needsReview,
       balanceAction,
       recurring: currentPlan.counts.recurring,
-      transfers: currentPlan.counts.transfers
+      transfers: currentPlan.counts.transfers,
+      awaitingImportReview: !preview.reconciled
     }
   };
 }

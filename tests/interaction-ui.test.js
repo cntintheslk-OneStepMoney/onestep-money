@@ -62,3 +62,23 @@ test('all transient and update notifications share a promoted browser top layer'
   assert.match(css, /\.notification-layer \{[^}]*position: fixed;[^}]*inset: 0;[^}]*z-index: 2147483647/);
   assert.match(css, /\.notification-layer::backdrop \{ background: transparent; pointer-events: none; \}/);
 });
+
+test('Review Inbox uses accessible controls, restrained counts and progressive disclosure', async () => {
+  const [html, renderer, css] = await Promise.all([
+    fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../styles.css', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /data-view="review"[\s\S]*id="reviewNavCount"/);
+  assert.match(html, /id="view-review"[\s\S]*id="reviewInboxStatus"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="reviewDoneState"[\s\S]*Nothing needs reviewing right now/);
+  assert.match(html, /id="reviewActiveList"/);
+  assert.match(html, /id="reviewSnoozedList"/);
+  assert.match(renderer, /resolveReviewItem\(state/);
+  assert.match(renderer, /snoozeReviewGroup\(state/);
+  assert.match(renderer, /openEditor\('transaction', route\.id, \{ reviewItemId: item\.id \}\)/);
+  assert.match(renderer, /knownPaydayDay\(state\.profile\?\.paydayDay\)/);
+  assert.match(css, /\.review-priority/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
