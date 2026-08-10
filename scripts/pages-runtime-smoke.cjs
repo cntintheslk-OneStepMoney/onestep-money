@@ -1,20 +1,31 @@
-import fs from 'node:fs/promises';
-import http from 'node:http';
-import path from 'node:path';
-import { app, BrowserWindow } from 'electron';
-import { buildPagesSite } from './build-pages-site.mjs';
+const fs = require('node:fs/promises');
+const http = require('node:http');
+const path = require('node:path');
+const { app, BrowserWindow } = require('electron');
 
 app.disableHardwareAcceleration();
 
 const publicUrl = String(process.env.PAGES_SMOKE_URL || '').trim();
 let server;
+let browserWindow;
+let exitCode = 0;
 
-try {
+app.whenReady()
+  .then(runSmoke)
+  .catch((error) => {
+    console.error(`Pages runtime smoke failed: ${error.message}`);
+    exitCode = 1;
+  })
+  .finally(async () => {
+    if (browserWindow && !browserWindow.isDestroyed()) browserWindow.destroy();
+    await closeServer();
+    app.exit(exitCode);
+  });
+
+async function runSmoke() {
   const targetUrl = publicUrl || await startBuiltPagesServer();
-  await app.whenReady();
-
   const runtimeErrors = [];
-  const window = new BrowserWindow({
+  browserWindow = new BrowserWindow({
     show: false,
     width: 1280,
     height: 900,
@@ -25,15 +36,15 @@ try {
     }
   });
 
-  window.webContents.on('console-message', (_event, level, message) => {
+  browserWindow.webContents.on('console-message', (_event, level, message) => {
     if (level >= 3) runtimeErrors.push(String(message || 'Browser console error'));
   });
-  window.webContents.on('render-process-gone', (_event, details) => {
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
     runtimeErrors.push(`Renderer stopped: ${details.reason}`);
   });
 
-  await window.loadURL(targetUrl);
-  const result = await window.webContents.executeJavaScript(`
+  await browserWindow.loadURL(targetUrl);
+  const result = await browserWindow.webContents.executeJavaScript(`
     (async () => {
       const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
       const requireNode = (selector, label) => {
@@ -84,23 +95,16 @@ try {
 
   if (!result?.ready) throw new Error('Pages runtime smoke did not complete.');
   if (runtimeErrors.length) throw new Error(`Pages runtime emitted ${runtimeErrors.length} browser error(s): ${runtimeErrors[0]}`);
-
   console.log(publicUrl ? 'Public Pages runtime smoke passed.' : 'Built Pages artifact runtime smoke passed.');
-  window.destroy();
-} catch (error) {
-  console.error(`Pages runtime smoke failed: ${error.message}`);
-  process.exitCode = 1;
-} finally {
-  await closeServer();
-  app.quit();
 }
 
 async function startBuiltPagesServer() {
+  const { buildPagesSite } = await import('./build-pages-site.mjs');
   const { output } = await buildPagesSite();
   server = http.createServer(async (request, response) => {
     try {
       const requestPath = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
-      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
+      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\\/+/, '');
       const filePath = path.resolve(output, relativePath);
       const relative = path.relative(output, filePath);
       if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid path');
