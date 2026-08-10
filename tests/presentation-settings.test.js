@@ -28,6 +28,12 @@ test('valid dashboard choices persist while malformed layout state resets only p
   assert.deepEqual(normaliseAppearanceSettings({ theme: 'not-a-theme' }), { theme: 'system' });
 });
 
+test('Light, Night and Follow System appearance preferences remain valid', () => {
+  for (const theme of ['light', 'dark', 'system']) {
+    assert.deepEqual(normaliseAppearanceSettings({ theme }), { theme });
+  }
+});
+
 test('dashboard modules support keyboard-equivalent ordering without a freeform canvas', () => {
   const moved = moveDashboardModule(defaultDashboardSettings(), 'balance', 'down');
   assert.equal(moved.order.indexOf('balance'), 2);
