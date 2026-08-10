@@ -2,7 +2,7 @@ name: Test and release
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/github-pages-demo-recovery]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -25,7 +25,7 @@ jobs:
       - run: npm run lint
 
   test-windows:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/fix/github-pages-demo-recovery'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
