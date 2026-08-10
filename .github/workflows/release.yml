@@ -37,6 +37,15 @@ jobs:
       - run: npm test
       - run: npm run check
       - run: npm run lint
+      - name: Built Pages artifact runtime smoke test
+        timeout-minutes: 2
+        run: npm run smoke:pages
+      - name: Current public Pages runtime diagnostic
+        continue-on-error: true
+        timeout-minutes: 2
+        run: npm run smoke:pages
+        env:
+          PAGES_SMOKE_URL: https://cntintheslk-onestepmoney.github.io/onestep-money/
       - name: Electron desktop startup smoke test
         timeout-minutes: 2
         run: npm run capture
