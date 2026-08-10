@@ -30,6 +30,7 @@ bindEvents();
 applyTheme();
 renderAll();
 openWelcome();
+window.dispatchEvent(new Event('onestep-demo-ready'));
 if (loaded.recovered) showToast('The demo state was malformed, so the fictional baseline was restored safely.');
 
 function bindEvents() {
