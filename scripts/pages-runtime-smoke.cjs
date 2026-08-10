@@ -36,14 +36,17 @@ async function runSmoke() {
     }
   });
 
-  browserWindow.webContents.on('console-message', (_event, level, message) => {
-    if (level >= 3) runtimeErrors.push(String(message || 'Browser console error'));
+  browserWindow.webContents.on('console-message', (_event, details) => {
+    const level = Number(details?.level ?? 0);
+    if (level >= 3) runtimeErrors.push(String(details?.message || 'Browser console error'));
   });
   browserWindow.webContents.on('render-process-gone', (_event, details) => {
     runtimeErrors.push(`Renderer stopped: ${details.reason}`);
   });
 
   await browserWindow.loadURL(targetUrl);
+  await new Promise((resolve) => { setTimeout(resolve, 100); });
+  if (runtimeErrors.length) throw new Error(`Pages runtime emitted ${runtimeErrors.length} browser error(s): ${runtimeErrors[0]}`);
   const result = await browserWindow.webContents.executeJavaScript(`
     (async () => {
       const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
