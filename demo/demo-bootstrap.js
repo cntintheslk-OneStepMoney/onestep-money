@@ -1,6 +1,7 @@
 (() => {
   const failureDelay = 2500;
   const timer = window.setTimeout(showStartupFailure, failureDelay);
+  document.getElementById('refreshDemoButton')?.addEventListener('click', () => window.location.reload());
 
   window.addEventListener('onestep-demo-ready', () => {
     window.clearTimeout(timer);
