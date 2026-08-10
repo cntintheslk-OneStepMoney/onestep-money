@@ -1,3 +1,24 @@
+.demo-startup-error {
+  position: fixed;
+  z-index: 2000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: var(--bg);
+}
+.demo-startup-error[hidden] { display: none; }
+.demo-startup-error-card {
+  width: min(560px, 100%);
+  padding: clamp(1.4rem, 5vw, 2.4rem);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  box-shadow: var(--shadow-strong);
+}
+.demo-startup-error-card p:not(.eyebrow) { color: var(--ink-soft); line-height: 1.6; }
+
 .skip-link {
   position: fixed;
   z-index: 1000;
