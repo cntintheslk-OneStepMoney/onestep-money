@@ -65,6 +65,8 @@ async function runSmoke() {
       };
 
       expect(Boolean(document.querySelector('.demo-badge')), 'Expected the allowlisted Browser Demo artifact.');
+      expect(document.documentElement.dataset.demoStartup === 'ready', 'Demo did not report successful startup.');
+      expect(requireNode('#demoStartupError', 'startup failure panel').hidden, 'Startup failure panel remained visible.');
       const welcome = requireNode('#demoWelcome', 'welcome dialog');
       expect(welcome.open, 'Welcome dialog did not open.');
       expect(welcome.matches(':modal'), 'Welcome dialog is not modal.');
