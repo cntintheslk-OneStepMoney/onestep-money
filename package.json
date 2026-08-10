@@ -22,6 +22,7 @@
     "benchmark:quality": "node scripts/benchmark-quality.mjs",
     "start": "electron .",
     "desktop": "electron .",
+    "demo": "node static-preview-server.js",
     "preview": "node static-preview-server.js",
     "capture": "electron . --capture-ui",
     "dist:win": "electron-builder --win nsis",

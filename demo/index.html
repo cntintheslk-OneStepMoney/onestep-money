@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Explore OneStep Money with a fictional, private, resettable browser demo." />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" />
+    <title>OneStep Money — Interactive Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/demo/demo.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#demoMain">Skip to demo content</a>
+
+    <dialog id="demoWelcome" class="demo-welcome" open aria-labelledby="demoWelcomeTitle">
+      <div class="demo-welcome-mark"><img src="/assets/onestep-money-icon.png" alt="" /></div>
+      <p class="eyebrow">INTERACTIVE FICTIONAL DEMO</p>
+      <h1 id="demoWelcomeTitle">See how OneStep makes money feel manageable</h1>
+      <p>Explore a made-up financial month for Alex Rowan. Change categories, work through Review Inbox, test Financial Safety and reset whenever you like.</p>
+      <ul>
+        <li>No account or installation is required.</li>
+        <li>No real documents can be uploaded here.</li>
+        <li>Your changes stay in this browser tab and are never sent to OneStep.</li>
+      </ul>
+      <div class="demo-welcome-actions">
+        <button id="enterDemoButton" class="primary-button" type="button">Explore the demo</button>
+        <span>About 3 minutes to see the essentials</span>
+      </div>
+    </dialog>
+
+    <div id="demoShell" class="app-shell demo-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-mark" src="/assets/onestep-money-icon.png" alt="" aria-hidden="true" />
+          <div class="brand-copy"><strong><span>OneStep</span> <span>Money</span></strong><span>One clear move at a time.</span></div>
+        </div>
+        <div class="demo-badge"><span aria-hidden="true">◆</span><span><strong>Browser Demo</strong>Fictional data only</span></div>
+        <nav aria-label="Demo navigation">
+          <button class="nav-button active" type="button" data-view="dashboard" aria-current="page"><span class="demo-nav-icon" aria-hidden="true">▦</span><span>Dashboard</span></button>
+          <button class="nav-button" type="button" data-view="today"><span class="demo-nav-icon" aria-hidden="true">◷</span><span>Today</span></button>
+          <button class="nav-button" type="button" data-view="review"><span class="demo-nav-icon" aria-hidden="true">✓</span><span>Review <span id="reviewNavCount" class="nav-count">0</span></span></button>
+          <button class="nav-button" type="button" data-view="payments"><span class="demo-nav-icon" aria-hidden="true">⇅</span><span>Payments</span></button>
+          <button class="nav-button" type="button" data-view="budget"><span class="demo-nav-icon" aria-hidden="true">▥</span><span>Budget</span></button>
+          <button class="nav-button" type="button" data-view="pay"><span class="demo-nav-icon" aria-hidden="true">£</span><span>Pay</span></button>
+          <button class="nav-button" type="button" data-view="safety"><span class="demo-nav-icon" aria-hidden="true">◇</span><span>Financial Safety</span></button>
+          <button class="nav-button" type="button" data-view="settings"><span class="demo-nav-icon" aria-hidden="true">⚙</span><span>Demo settings</span></button>
+        </nav>
+        <footer class="sidebar-footer">
+          <div class="privacy-status"><span class="status-dot"></span><span class="privacy-copy"><strong>Private on this device</strong><span>Session-only fictional changes</span></span></div>
+          <p class="app-version">Demo for OneStep Money v2.1.26</p>
+        </footer>
+      </aside>
+
+      <main id="demoMain" class="main-content" tabindex="-1">
+        <header class="topbar demo-topbar">
+          <div class="title-stack"><p id="viewEyebrow" class="eyebrow">FICTIONAL MONEY AT A GLANCE</p><h1 id="viewTitle">Dashboard</h1></div>
+          <div class="topbar-actions">
+            <span class="fictional-chip">Alex Rowan · August 2026</span>
+            <button id="quickThemeButton" class="secondary-button" type="button" aria-label="Switch between light and night presentation">Night mode</button>
+            <button id="resetDemoButton" class="secondary-button" type="button">Reset demo</button>
+          </div>
+        </header>
+
+        <section id="demoGuidance" class="demo-guidance" aria-labelledby="demoGuidanceTitle">
+          <div><p class="eyebrow">A GOOD PLACE TO START</p><strong id="demoGuidanceTitle">Try the Next Move, then compare Payments with Budget.</strong><p>Everything uses one fictional dataset, so actions and totals update together.</p></div>
+          <button id="dismissGuidanceButton" class="icon-button" type="button" aria-label="Dismiss demo guidance">×</button>
+        </section>
+
+        <section id="view-dashboard" class="view active" data-view-panel="dashboard" aria-labelledby="viewTitle">
+          <div id="dashboardGrid" class="dashboard-grid demo-dashboard-grid">
+            <article class="dashboard-module dashboard-next-move module-wide">
+              <div class="dashboard-module-heading"><div><p class="eyebrow">NEXT MOVE</p><h2 id="dashboardNextTitle">Loading…</h2></div><span id="dashboardNextBand" class="next-move-band">Important</span></div>
+              <p id="dashboardNextDetail" class="dashboard-lead"></p>
+              <div class="dashboard-module-footer"><span id="dashboardNextTime" class="time-chip">10 min</span><button class="primary-button" type="button" data-open-view="today">Open Next Move</button></div>
+            </article>
+            <article class="dashboard-module"><div class="dashboard-module-heading"><div><p class="eyebrow">MONEY POSITION</p><h2>Balance overview</h2></div></div><div class="dashboard-stat-pair"><div><span>Account balances</span><strong id="dashboardBalance">£0.00</strong></div><div><span>Available now</span><strong id="dashboardAvailable">£0.00</strong></div></div><p id="dashboardCashFlow" class="muted"></p></article>
+            <article class="dashboard-module"><div class="dashboard-module-heading"><div><p class="eyebrow">PLAN VERSUS ACTUAL</p><h2>Budget health</h2></div></div><strong id="dashboardBudgetRemaining" class="dashboard-hero-value">£0.00</strong><p id="dashboardBudgetText" class="muted"></p><div class="progress-track" aria-hidden="true"><span id="dashboardBudgetProgress"></span></div><button class="text-button" type="button" data-open-view="budget">Open Budget</button></article>
+            <article class="dashboard-module"><div class="dashboard-module-heading"><div><p class="eyebrow">COMING UP</p><h2>Commitments</h2></div></div><strong id="dashboardCommitments" class="dashboard-hero-value">£0.00</strong><p class="muted">Recorded payments that are not marked paid or cancelled.</p></article>
+            <article class="dashboard-module"><div class="dashboard-module-heading"><div><p class="eyebrow">UNRESOLVED WORK</p><h2>Review Inbox</h2></div></div><strong id="dashboardReviewCount" class="dashboard-hero-value">0</strong><p id="dashboardReviewText" class="muted"></p><button class="secondary-button" type="button" data-open-view="review">Open Review Inbox</button></article>
+            <article class="dashboard-module module-wide"><div class="dashboard-module-heading"><div><p class="eyebrow">MONEY IN / OUT</p><h2>August cash flow</h2></div><button class="text-button" type="button" data-open-view="payments">Open Payments</button></div><div id="cashFlowChart" class="demo-bar-chart" role="img" aria-label="Money in and money out comparison"></div><p id="cashFlowAlternative" class="chart-summary"></p></article>
+            <article class="dashboard-module module-wide"><div class="dashboard-module-heading"><div><p class="eyebrow">LATEST ACTIVITY</p><h2>Recent trusted payments</h2></div></div><div id="dashboardRecent" class="dashboard-list"></div></article>
+            <article class="dashboard-module module-wide"><div class="dashboard-module-heading"><div><p class="eyebrow">REAL PROGRESS</p><h2>Debt and savings</h2></div></div><div id="dashboardProgress" class="progress-list"></div></article>
+          </div>
+        </section>
+
+        <section id="view-today" class="view" data-view-panel="today" hidden aria-labelledby="viewTitle">
+          <article class="focus-panel">
+            <div class="focus-copy"><div class="step-emblem" aria-hidden="true"><span>1</span></div><div><div class="next-move-meta"><p class="eyebrow">NEXT MOVE</p><span id="todayBand" class="next-move-band">Important</span></div><h2 id="todayTitle">Loading…</h2><p id="todayDetail"></p><details class="next-move-why"><summary>Why this?</summary><p id="todayWhy"></p></details></div></div>
+            <div class="focus-actions"><span id="todayTime" class="time-chip">10 min</span><button id="todayDoButton" class="primary-button" type="button">Do it</button><button id="todaySnoozeButton" class="secondary-button" type="button">Snooze 1 week</button></div>
+          </article>
+          <p class="permission-slip"><span aria-hidden="true">✓</span>No catching up. Finish this one useful step, then stop.</p>
+          <div class="metric-grid"><article class="metric-card"><span>Planned margin</span><strong id="todayMargin">£0.00</strong><small>After recorded budgets</small></article><article class="metric-card"><span>August cash flow</span><strong id="todayCashFlow">£0.00</strong><small>Trusted external activity</small></article><article class="metric-card"><span>Total borrowing</span><strong id="todayDebt">£0.00</strong><small>Debt and overdraft</small></article><article class="metric-card"><span>Review work</span><strong id="todayReview">0</strong><small>Grouped decisions</small></article></div>
+          <section class="panel"><div class="section-heading"><div><h2>Also worth doing</h2><p>A short supporting list. Everything else stays in Review Inbox.</p></div></div><div id="todaySupporting" class="today-supporting-list"></div></section>
+        </section>
+
+        <section id="view-review" class="view" data-view-panel="review" hidden aria-labelledby="viewTitle">
+          <div class="review-hero"><div><p class="eyebrow">ONE PLACE FOR UNFINISHED WORK</p><h2 id="reviewHeading">Review Inbox</h2><p id="reviewIntro">Important decisions first, without turning money into an endless task list.</p></div><div id="reviewSummary" class="review-summary-counts"></div></div>
+          <div id="reviewActive" class="review-list"></div>
+          <section id="reviewSnoozedSection" class="review-snoozed-section"><div class="section-heading"><div><h2>Snoozed</h2><p>Still unresolved and due to return automatically.</p></div></div><div id="reviewSnoozed" class="review-list compact"></div></section>
+        </section>
+
+        <section id="view-payments" class="view" data-view-panel="payments" hidden aria-labelledby="viewTitle">
+          <div class="section-actions"><div><h2>Payment ledger</h2><p>Trusted totals exclude the possible duplicate until Alex decides.</p></div><button id="showImportButton" class="primary-button" type="button">Try fictional import preview</button></div>
+          <div class="demo-filter-row"><label>Search payments<input id="paymentSearch" type="search" autocomplete="off" placeholder="Merchant or category" /></label><label>Category<select id="paymentCategoryFilter"><option value="all">All categories</option></select></label></div>
+          <div class="metric-grid"><article class="metric-card"><span>Money in</span><strong id="paymentsIncome">£0.00</strong><small>Trusted external income</small></article><article class="metric-card"><span>Money out</span><strong id="paymentsSpending">£0.00</strong><small>Trusted external spending</small></article><article class="metric-card"><span>Net cash flow</span><strong id="paymentsNet">£0.00</strong><small>Money in minus money out</small></article><article class="metric-card"><span>Uncategorised</span><strong id="paymentsUncategorised">£0.00</strong><small>Included, but needs review</small></article></div>
+          <div class="table-wrap"><table><caption class="sr-only">Fictional August 2026 payment ledger</caption><thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Category / review</th><th scope="col">Money in</th><th scope="col">Money out</th><th scope="col">Trust</th></tr></thead><tbody id="paymentRows"></tbody></table></div>
+        </section>
+
+        <section id="view-budget" class="view" data-view-panel="budget" hidden aria-labelledby="viewTitle">
+          <div class="section-heading"><div><h2>Plan vs Actual</h2><p>Actual values come from the same Payments ledger. Categorise the cafe payment and watch both screens update.</p></div></div>
+          <div class="metric-grid"><article class="metric-card"><span>Planned</span><strong id="budgetPlanned">£0.00</strong><small>August categories</small></article><article class="metric-card"><span>Actual</span><strong id="budgetActual">£0.00</strong><small>Trusted spending</small></article><article class="metric-card"><span>Remaining</span><strong id="budgetRemaining">£0.00</strong><small>Plan minus actual</small></article><article class="metric-card"><span>Categorised</span><strong id="budgetCoverage">0%</strong><small>Trusted spending coverage</small></article></div>
+          <div id="budgetRows" class="demo-budget-list"></div>
+        </section>
+
+        <section id="view-pay" class="view" data-view-panel="pay" hidden aria-labelledby="viewTitle">
+          <div class="metric-grid"><article class="metric-card"><span>Gross pay</span><strong id="grossPay">£0.00</strong><small>Fictional August payslip</small></article><article class="metric-card"><span>Deductions</span><strong id="payDeductions">£0.00</strong><small>Tax, NI and other deductions</small></article><article class="metric-card"><span>Net pay</span><strong id="netPay">£0.00</strong><small>Matches Money In</small></article></div>
+          <article class="panel demo-boundary-card"><p class="eyebrow">WINDOWS APP CAPABILITY</p><h2>Payslip import is unavailable in this public demo</h2><p>The desktop app can keep supported payslips inside its encrypted local document vault. This browser demo uses one prepared fictional pay record and does not accept uploads.</p></article>
+        </section>
+
+        <section id="view-safety" class="view" data-view-panel="safety" hidden aria-labelledby="viewTitle">
+          <article id="safetyHero" class="panel safety-hero"><p class="eyebrow">FINANCIAL SAFETY IS AUTHORITATIVE</p><h2 id="safetyTitle">Checking recorded borrowing…</h2><p id="safetyText"></p><div class="safety-amount"><span>Requested optional payment</span><strong id="safetyRequested">£0.00</strong><span>Safely available</span><strong id="safetyAvailable">£0.00</strong></div></article>
+          <div id="safetyAccounts" class="demo-safety-grid"></div>
+          <article class="panel demo-boundary-card"><p class="eyebrow">WHY ONE STEP IS CAUTIOUS</p><h2>Defaulted and arranged accounts are never treated like ordinary overpayments</h2><p>Use the Review Inbox action to confirm the fictional arrangement. OneStep protects the agreed payment and still does not assign discretionary overpayments to that account.</p></article>
+        </section>
+
+        <section id="view-settings" class="view" data-view-panel="settings" hidden aria-labelledby="viewTitle">
+          <div class="settings-grid">
+            <article class="panel"><h2>Presentation</h2><fieldset><legend>Theme</legend><div class="theme-segmented" role="radiogroup" aria-label="Theme preference"><label class="theme-option"><input type="radio" name="demo-theme" value="system" /><span>System</span></label><label class="theme-option"><input type="radio" name="demo-theme" value="light" /><span>Light</span></label><label class="theme-option"><input type="radio" name="demo-theme" value="dark" /><span>Night</span></label></div></fieldset><p class="muted">The demo uses the same Light, Night and Follow System contract as desktop OneStep.</p></article>
+            <article class="panel"><h2>Demo state</h2><p>Changes are stored only in this browser tab using session storage. Closing the tab disposes of them. Reset restores the canonical fictional baseline.</p><button class="danger-button" type="button" data-reset-demo>Reset fictional data</button></article>
+            <article class="panel"><h2>Privacy boundary</h2><p>No account, analytics, advertising SDK, cloud financial storage, remote logging or real document upload is used. The Windows desktop app remains the authoritative private local-first product.</p></article>
+            <article class="panel"><h2>Desktop-only features</h2><p>Encrypted backup/restore, the private document vault, live filesystem imports, updates and local model integration require the Windows app. The browser demo labels these boundaries rather than pretending they are web services.</p></article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="importPreviewDialog" class="modal wide demo-import-dialog" aria-labelledby="importPreviewTitle">
+      <div class="modal-heading"><div><p class="eyebrow">SIMULATED · FICTIONAL FIXTURE</p><h2 id="importPreviewTitle">Review a prepared statement preview</h2></div><button id="closeImportButton" class="icon-button" type="button" aria-label="Close fictional import preview">×</button></div>
+      <div class="warning-box">This is not a real upload. These three made-up rows exist only to demonstrate the desktop review step.</div>
+      <div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Money in</th><th scope="col">Money out</th></tr></thead><tbody><tr><td>8 Aug 2026</td><td>Northstar Grocers</td><td>—</td><td>£34.25</td></tr><tr><td>9 Aug 2026</td><td>Cityline Bus</td><td>—</td><td>£4.50</td></tr><tr><td>9 Aug 2026</td><td>Northstar Grocers refund</td><td>£5.25</td><td>—</td></tr></tbody></table></div>
+      <div class="modal-actions"><button id="cancelImportButton" class="secondary-button" type="button">Keep demo unchanged</button><button id="applyImportButton" class="primary-button" type="button">Apply fictional preview</button></div>
+    </dialog>
+
+    <div id="demoToast" class="toast demo-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <script type="module" src="/demo/demo-app.js"></script>
+  </body>
+</html>

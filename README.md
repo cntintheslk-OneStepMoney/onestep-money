@@ -103,13 +103,15 @@ npm run lint
 npm start
 ```
 
-For a local browser-safe interface preview:
+For the interactive browser demo:
 
 ```sh
-npm run preview
+npm run demo
 ```
 
-The preview never exposes live finance data or the document vault.
+Open `http://127.0.0.1:3000`. The demo uses one canonical fictional dataset and the same pure reporting, Review Inbox, Next Move, Financial Safety and theme contracts as the desktop application. Interactive changes use browser session storage and can be reset at any time.
+
+The demo does not accept real financial documents, create a OneStep account, store financial data in a cloud backend, load analytics or weaken the Electron desktop vault. Desktop-only workflows are either demonstrated with prepared fictional fixtures or labelled as available only in the Windows app. `npm run preview` remains an alias for the same browser-demo server; the desktop-only preview is available at `/desktop-preview`.
 
 ## Build Windows installer
 
