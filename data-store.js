@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { normaliseAutomationState } from './automation-state.js';
 import { localFinancialMonthKey } from './date-utils.js';
 import { normaliseAppearanceSettings, normaliseDashboardSettings } from './presentation-settings.js';
 import { knownPaydayDay, synchroniseReviewItems } from './review-lifecycle.js';
@@ -13,7 +14,7 @@ const BACKUP_MAGIC = Buffer.from('LFB1');
 const LEGACY_BACKUP_MAGIC = Buffer.from('HFB1');
 const PORTABLE_BACKUP_FORMAT_VERSION = 2;
 const LOCAL_BACKUP_FORMAT_VERSION = 1;
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const FRESH_START_CONFIRMATION_MS = 5 * 60 * 1000;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
@@ -1855,6 +1856,7 @@ function migrateState(input) {
       updatedAt: state.meta?.updatedAt || new Date().toISOString(),
       revision: nonNegativeInteger(state.meta?.revision, 0)
     },
+    automation: normaliseAutomationState(state.automation),
     profile: migrateProfile(state.profile, state.schemaVersion),
     accounts: Array.isArray(state.accounts) ? state.accounts : [],
     transactions: Array.isArray(state.transactions) ? state.transactions.map(migrateTransactionReviewState) : [],
@@ -2050,7 +2052,7 @@ function validateStoredState(state) {
       throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
     }
   }
-  for (const objectName of ['meta', 'profile', 'settings']) {
+  for (const objectName of ['meta', 'automation', 'profile', 'settings']) {
     if (state[objectName] !== undefined && !isPlainObject(state[objectName])) {
       throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
     }
@@ -2067,7 +2069,9 @@ function validateMigratedState(state) {
   for (const collection of STATE_COLLECTIONS) {
     if (!Array.isArray(state[collection])) throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
-  if (!isPlainObject(state.meta) || !isPlainObject(state.profile) || !isPlainObject(state.settings)
+  if (!isPlainObject(state.meta) || !isPlainObject(state.automation) || state.automation.version !== 1
+    || typeof state.automation.enabled !== 'boolean' || !isPlainObject(state.automation.executions) || !isPlainObject(state.automation.manualOverrides)
+    || !isPlainObject(state.profile) || !isPlainObject(state.settings)
     || !isPlainObject(state.settings.reminders) || !isPlainObject(state.settings.appearance) || !isPlainObject(state.settings.dashboard)) {
     throw new StateLoadError(LOAD_REASON_CODES.SCHEMA_VALIDATION_FAILURE);
   }
