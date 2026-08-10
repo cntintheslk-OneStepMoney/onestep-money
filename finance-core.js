@@ -1,6 +1,7 @@
 import { localFinancialMonthKey } from './date-utils.js';
 import { synchroniseReviewItems } from './review-lifecycle.js';
 import { prioritySnapshot } from './next-move-priority.js';
+import { resolveTransactionBudgetAssignment } from './transaction-categorisation.js';
 
 export const SCHEMA_VERSION = 9;
 export const ALL_TIME_PERIOD = 'all';
@@ -93,8 +94,6 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   const budgets = (state.budgets || []).filter((budget) => !isIncomeCategory(budget.category));
   const monthCount = reportingPeriodMonthCount(state, month);
   const transactions = periodTransactions(state.transactions, month);
-  const budgetsById = new Map(budgets.map((budget) => [String(budget.id), budget]));
-  const transactionsById = new Map((state.transactions || []).map((transaction) => [String(transaction.id), transaction]));
   const actualPennies = new Map(budgets.map((budget) => [String(budget.id), 0]));
   const contributions = new Map(budgets.map((budget) => [String(budget.id), []]));
   const assignmentCache = new Map();
@@ -103,38 +102,10 @@ export function calculateBudgetAnalysis(state, month = state.settings?.selectedM
   let categorisedGrossPennies = 0;
   let eligibleGrossPennies = 0;
 
-  const assignedBudget = (transaction, visited = new Set()) => {
+  const assignedBudget = (transaction) => {
     const transactionId = String(transaction?.id || '');
     if (transactionId && assignmentCache.has(transactionId)) return assignmentCache.get(transactionId);
-    if (!transaction || visited.has(transactionId)) return null;
-    visited.add(transactionId);
-
-    const explicit = transaction.budgetCategoryId && budgetsById.get(String(transaction.budgetCategoryId));
-    if (explicit) {
-      if (transactionId) assignmentCache.set(transactionId, explicit);
-      return explicit;
-    }
-    if (transaction.categorySource === 'manual') {
-      if (transactionId) assignmentCache.set(transactionId, null);
-      return null;
-    }
-
-    const linkedId = transaction.refundOfTransactionId || transaction.reversalOfTransactionId;
-    const linked = linkedId ? transactionsById.get(String(linkedId)) : null;
-    if (linked) {
-      const linkedBudget = assignedBudget(linked, visited);
-      if (transactionId) assignmentCache.set(transactionId, linkedBudget);
-      return linkedBudget;
-    }
-
-    const category = normalise(transaction.category);
-    const description = normalise(transaction.description);
-    const matches = budgets.filter((budget) => {
-      const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalise);
-      const terms = (budget.merchantTerms || []).map(normalise).filter(Boolean);
-      return (category && categories.includes(category)) || (Number(transaction.outgoing || 0) > 0 && terms.some((term) => description.includes(term)));
-    });
-    const match = matches.length === 1 ? matches[0] : null;
+    const match = resolveTransactionBudgetAssignment(transaction, { budgets, transactions: state.transactions || [] }).budget;
     if (transactionId) assignmentCache.set(transactionId, match);
     return match;
   };

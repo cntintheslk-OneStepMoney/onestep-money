@@ -1,3 +1,5 @@
+import { resolveTransactionBudgetAssignment } from './transaction-categorisation.js';
+
 const REVIEW_STATUSES = new Set(['needs_attention', 'in_progress', 'snoozed', 'resolved']);
 const REVIEW_PRIORITIES = new Set(['high', 'normal', 'low']);
 
@@ -240,7 +242,7 @@ function reviewSources(state, now) {
 function uncategorisedSources(state) {
   const budgets = state.budgets || [];
   return (state.transactions || [])
-    .filter((transaction) => transactionNeedsCategory(transaction, budgets))
+    .filter((transaction) => transactionNeedsCategory(transaction, budgets, state.transactions || []))
     .map((transaction) => ({
       type: 'uncategorised_payment', priority: 'normal', sourceType: 'transaction', sourceId: transaction.id,
       groupKey: merchantKey(transaction), conditionKey: categoryConditionKey(transaction)
@@ -298,22 +300,13 @@ function taskSources(state, now) {
     .map((task) => ({ type: 'generated_action', priority: task.priority === 'high' ? 'high' : 'normal', sourceType: 'task', sourceId: task.id, groupKey: '', conditionKey: String(task.updatedAt || task.createdAt || '') }));
 }
 
-function transactionNeedsCategory(transaction, budgets) {
+function transactionNeedsCategory(transaction, budgets, transactions = []) {
   if (!transaction || transaction.deletedAt || transaction.ignored === true || transaction.valid === false) return false;
   if (transaction.duplicateStatus === 'exact' || transaction.reviewStatus === 'rejected' || transaction.financiallyActive === false) return false;
   if (Number(transaction.outgoing || 0) <= 0 || normalise(transaction.category) === 'income') return false;
   if (['transfer', 'savings_transfer', 'debt_payment', 'ignored'].includes(normalise(transaction.budgetTreatment))) return false;
   if (transaction.transferStatus === 'confirmed') return false;
-  if (transaction.budgetCategoryId && budgets.some((budget) => String(budget.id) === String(transaction.budgetCategoryId))) return false;
-  if (transaction.categorySource === 'manual') return !normalise(transaction.category);
-  const category = normalise(transaction.category);
-  const description = normalise(transaction.description);
-  const matches = budgets.filter((budget) => {
-    const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalise);
-    const terms = (budget.merchantTerms || []).map(normalise).filter(Boolean);
-    return (category && categories.includes(category)) || terms.some((term) => description.includes(term));
-  });
-  return matches.length !== 1;
+  return !resolveTransactionBudgetAssignment(transaction, { budgets, transactions }).budget;
 }
 
 function financialActionReasons(account, sourceType) {
@@ -337,7 +330,7 @@ function financialActionReasons(account, sourceType) {
 function sourceResolved(state, item) {
   if (item.type === 'uncategorised_payment') {
     const transaction = (state.transactions || []).find((entry) => String(entry.id) === item.sourceId);
-    return !transaction || !transactionNeedsCategory(transaction, state.budgets || []);
+    return !transaction || !transactionNeedsCategory(transaction, state.budgets || [], state.transactions || []);
   }
   if (item.type === 'financial_action') {
     const collection = item.sourceType === 'overdraft' ? state.overdrafts : state.debts;
@@ -538,8 +531,8 @@ function hashId(value) { let hash = 2166136261; for (const character of value) {
 function compareReviewPriority(left, right) { return priorityRank(left.priority) - priorityRank(right.priority) || String(left.createdAt || '').localeCompare(String(right.createdAt || '')) || String(left.id).localeCompare(String(right.id)); }
 function priorityRank(value) { return ({ high: 0, normal: 1, low: 2 })[value] ?? 3; }
 function normalise(value) { return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' '); }
-function merchantKey(transaction) { return normalise(transaction.userDescription || transaction.description).replace(/\b\d+\b/g, '').trim().slice(0, 80) || 'other'; }
-function displayMerchant(transaction) { return String(transaction?.userDescription || transaction?.description || 'Payment').trim().replace(/\s+/g, ' ').slice(0, 80); }
+function merchantKey(transaction) { return normalise(transaction.merchantName || transaction.userDescription || transaction.description).replace(/\b\d+\b/g, '').trim().slice(0, 80) || 'other'; }
+function displayMerchant(transaction) { return String(transaction?.merchantName || transaction?.userDescription || transaction?.description || 'Payment').trim().replace(/\s+/g, ' ').slice(0, 80); }
 function displayGroupMerchant(transaction) { return displayMerchant(transaction).replace(/\b\d+\b/g, '').replace(/\s+/g, ' ').trim() || 'Related'; }
 function categoryConditionKey(transaction) { return [transaction.budgetCategoryId || '', transaction.category || '', transaction.categorySource || '', transaction.budgetTreatment || ''].join('|'); }
 function knownNonNegative(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0; }
