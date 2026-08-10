@@ -135,5 +135,5 @@ function contentType(filePath) {
 
 async function closeServer() {
   if (!server) return;
-  await new Promise((resolve) => server.close(resolve));
+  await new Promise((resolve) => { server.close(resolve); });
 }
