@@ -27,6 +27,9 @@ jobs:
   test-windows:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/fix/github-pages-demo-recovery'
     runs-on: windows-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,14 +41,68 @@ jobs:
       - run: npm run check
       - run: npm run lint
       - name: Built Pages artifact runtime smoke test
-        timeout-minutes: 2
-        run: npm run smoke:pages
-      - name: Current public Pages runtime diagnostic
+        id: built_pages_smoke
         continue-on-error: true
         timeout-minutes: 2
-        run: npm run smoke:pages
+        shell: pwsh
+        run: |
+          npm run smoke:pages 2>&1 | Tee-Object -FilePath built-pages-smoke.log
+          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          exit 0
+      - name: Current public Pages runtime diagnostic
+        id: public_pages_smoke
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          npm run smoke:pages 2>&1 | Tee-Object -FilePath public-pages-smoke.log
+          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          exit 0
         env:
           PAGES_SMOKE_URL: https://cntintheslk-onestepmoney.github.io/onestep-money/
+      - name: Report recovery-branch Pages diagnostics
+        if: github.ref == 'refs/heads/fix/github-pages-demo-recovery' && always()
+        uses: actions/github-script@v8
+        env:
+          BUILT_EXIT: ${{ steps.built_pages_smoke.outputs.exit_code }}
+          PUBLIC_EXIT: ${{ steps.public_pages_smoke.outputs.exit_code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const tail = (file) => fs.existsSync(file)
+              ? fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(-12).join('\n')
+              : 'Diagnostic did not produce a log.';
+            const body = [
+              '### Recovery branch Pages diagnostic',
+              '',
+              `Commit: ${context.sha}`,
+              `Built artifact exit: ${process.env.BUILT_EXIT || 'not-run'}`,
+              `Public URL exit: ${process.env.PUBLIC_EXIT || 'not-run'}`,
+              '',
+              '<details><summary>Built artifact technical tail</summary>',
+              '',
+              '~~~text',
+              tail('built-pages-smoke.log'),
+              '~~~',
+              '</details>',
+              '',
+              '<details><summary>Public URL technical tail</summary>',
+              '',
+              '~~~text',
+              tail('public-pages-smoke.log'),
+              '~~~',
+              '</details>'
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 101,
+              body
+            });
+      - name: Enforce built Pages runtime result
+        if: steps.built_pages_smoke.outputs.exit_code != '0'
+        shell: pwsh
+        run: exit 1
       - name: Electron desktop startup smoke test
         timeout-minutes: 2
         run: npm run capture
