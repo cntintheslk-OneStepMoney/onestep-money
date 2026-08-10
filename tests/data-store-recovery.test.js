@@ -55,6 +55,23 @@ test('malformed dashboard preferences reset without putting financial data into 
   assert.equal(result.state.settings.dashboard.order[0], 'next-move');
 });
 
+test('a valid Night Mode preference survives save and restart', async (t) => {
+  const harness = await createHarness(t);
+  const settings = { ...validState().settings, appearance: { theme: 'dark' } };
+  await fs.writeFile(harness.store.statePath, stateEnvelope(validState({ settings })));
+
+  const loaded = await harness.store.loadState();
+  assert.equal(loaded.state.settings.appearance.theme, 'dark');
+  await harness.store.saveState(loaded.state);
+
+  const restarted = new FinanceDataStore(harness.directory, seedPath, harness.diagnostics, {
+    secureStorage: secureStorage({ available: false }), clock: () => new Date(fixedNow)
+  });
+  await restarted.initialise();
+  const reopened = await restarted.loadState();
+  assert.equal(reopened.state.settings.appearance.theme, 'dark');
+});
+
 test('legacy debt safety fields migrate conservatively and persist across restart', async (t) => {
   const harness = await createHarness(t);
   const original = stateEnvelope(validState({

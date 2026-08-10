@@ -315,7 +315,7 @@ function bindEvents() {
   byId('dashboardCustomisationList').addEventListener('click', handleDashboardCustomisation);
   byId('dashboardCustomisationList').addEventListener('change', handleDashboardCustomisation);
   byId('resetDashboardButton').addEventListener('click', resetDashboard);
-  byId('themeSelect').addEventListener('change', saveThemePreference);
+  document.querySelectorAll('input[name="appearance-theme"]').forEach((input) => input.addEventListener('change', saveThemePreference));
   systemTheme.addEventListener('change', () => {
     if (state?.settings?.appearance?.theme === 'system') applyTheme();
   });
@@ -1253,7 +1253,10 @@ function renderSettings() {
   byId('bufferTargetInput').value = state.settings.emergencyBufferTarget;
   byId('bufferBalanceInput').value = state.settings.emergencyBufferBalance;
   byId('llmModelInput').value = state.settings.llmModel;
-  byId('themeSelect').value = state.settings.appearance.theme;
+  const theme = THEMES.includes(state.settings.appearance.theme) ? state.settings.appearance.theme : 'system';
+  document.querySelectorAll('input[name="appearance-theme"]').forEach((input) => {
+    input.checked = input.value === theme;
+  });
 }
 
 function renderPrivacy() {
@@ -2154,8 +2157,8 @@ async function resetDashboard() {
   showToast('Dashboard reset. Your financial data was not changed.');
 }
 
-async function saveThemePreference() {
-  const theme = byId('themeSelect').value;
+async function saveThemePreference(event) {
+  const theme = event?.target?.value;
   state.settings.appearance.theme = THEMES.includes(theme) ? theme : 'system';
   applyTheme();
   await saveState();
