@@ -1,7 +1,7 @@
 import {
-  calculateStreak, compareLabels, formatCurrency, formatDate, isTransactionFinanciallyActive,
-  periodTransactions
+  calculateStreak, formatCurrency, formatDate, isTransactionFinanciallyActive, periodTransactions
 } from '../finance-core.js';
+import { compareLabels } from '../presentation-settings.js';
 import { reviewItemPresentation } from '../review-lifecycle.js';
 import {
   actOnDemoReviewItem, applySimulatedImport, categoriseDemoTransaction, deriveDemoView,
