@@ -45,6 +45,8 @@
     "productName": "OneStep Money",
     "asar": true,
     "files": [
+      "automation-engine.js",
+      "automation-state.js",
       "data-store.js",
       "date-utils.js",
       "diagnostic-logger.js",
