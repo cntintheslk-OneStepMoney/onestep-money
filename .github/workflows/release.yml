@@ -20,9 +20,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm run check
-      - run: npm run lint
+      - id: tests
+        run: npm test
+      - id: checks
+        run: npm run check
+      - id: lint
+        run: npm run lint
 
   test-windows:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/fix/github-pages-demo-recovery'
@@ -37,10 +40,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm run check
-      - run: npm run lint
+      - id: tests
+        run: npm test
+      - id: checks
+        run: npm run check
+      - id: lint
+        run: npm run lint
       - name: Built Pages artifact runtime smoke test
+        if: always()
         id: built_pages_smoke
         continue-on-error: true
         timeout-minutes: 2
@@ -50,6 +57,7 @@ jobs:
           "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
           exit 0
       - name: Current public Pages runtime diagnostic
+        if: always()
         id: public_pages_smoke
         continue-on-error: true
         timeout-minutes: 2
@@ -64,6 +72,9 @@ jobs:
         if: github.ref == 'refs/heads/fix/github-pages-demo-recovery' && always()
         uses: actions/github-script@v8
         env:
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          CHECK_OUTCOME: ${{ steps.checks.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
           BUILT_EXIT: ${{ steps.built_pages_smoke.outputs.exit_code }}
           PUBLIC_EXIT: ${{ steps.public_pages_smoke.outputs.exit_code }}
         with:
@@ -76,6 +87,9 @@ jobs:
               '### Recovery branch Pages diagnostic',
               '',
               `Commit: ${context.sha}`,
+              `Tests: ${process.env.TEST_OUTCOME || 'not-run'}`,
+              `Project/privacy checks: ${process.env.CHECK_OUTCOME || 'not-run'}`,
+              `Lint: ${process.env.LINT_OUTCOME || 'not-run'}`,
               `Built artifact exit: ${process.env.BUILT_EXIT || 'not-run'}`,
               `Public URL exit: ${process.env.PUBLIC_EXIT || 'not-run'}`,
               '',
@@ -126,9 +140,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm run check
-      - run: npm run lint
+      - id: tests
+        run: npm test
+      - id: checks
+        run: npm run check
+      - id: lint
+        run: npm run lint
       - run: npm run release:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
