@@ -2,7 +2,7 @@ name: Test and release
 
 on:
   push:
-    branches: [main, fix/github-pages-demo-recovery]
+    branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -20,19 +20,13 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - id: tests
-        run: npm test
-      - id: checks
-        run: npm run check
-      - id: lint
-        run: npm run lint
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
 
   test-windows:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/fix/github-pages-demo-recovery'
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
-    permissions:
-      contents: read
-      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,136 +34,21 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - id: tests
-        run: npm test
-      - id: checks
-        run: npm run check
-      - id: lint
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          npm run lint 2>&1 | Tee-Object -FilePath lint.log
-          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
-          exit 0
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
       - name: Built Pages artifact runtime smoke test
-        if: always()
-        id: built_pages_smoke
-        continue-on-error: true
         timeout-minutes: 2
-        shell: pwsh
-        run: |
-          npm run smoke:pages 2>&1 | Tee-Object -FilePath built-pages-smoke.log
-          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
-          exit 0
-      - name: Current public Pages runtime diagnostic
-        if: always()
-        id: public_pages_smoke
-        continue-on-error: true
-        timeout-minutes: 2
-        shell: pwsh
-        run: |
-          npm run smoke:pages 2>&1 | Tee-Object -FilePath public-pages-smoke.log
-          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
-          exit 0
-        env:
-          PAGES_SMOKE_URL: https://cntintheslk-onestepmoney.github.io/onestep-money/
-      - name: Report recovery-branch Pages diagnostics
-        if: github.ref == 'refs/heads/fix/github-pages-demo-recovery' && always()
-        uses: actions/github-script@v8
-        env:
-          TEST_OUTCOME: ${{ steps.tests.outcome }}
-          CHECK_OUTCOME: ${{ steps.checks.outcome }}
-          LINT_OUTCOME: ${{ steps.lint.outcome }}
-          LINT_EXIT: ${{ steps.lint.outputs.exit_code }}
-          BUILT_EXIT: ${{ steps.built_pages_smoke.outputs.exit_code }}
-          PUBLIC_EXIT: ${{ steps.public_pages_smoke.outputs.exit_code }}
-        with:
-          script: |
-            const fs = require('fs');
-            const tail = (file) => fs.existsSync(file)
-              ? fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(-12).join('\n')
-              : 'Diagnostic did not produce a log.';
-            const body = [
-              '### Recovery branch Pages diagnostic',
-              '',
-              `Commit: ${context.sha}`,
-              `Tests: ${process.env.TEST_OUTCOME || 'not-run'}`,
-              `Project/privacy checks: ${process.env.CHECK_OUTCOME || 'not-run'}`,
-              `Lint step: ${process.env.LINT_OUTCOME || 'not-run'}; exit: ${process.env.LINT_EXIT || 'not-run'}`,
-              `Built artifact exit: ${process.env.BUILT_EXIT || 'not-run'}`,
-              `Public URL exit: ${process.env.PUBLIC_EXIT || 'not-run'}`,
-              '',
-              '<details><summary>Built artifact technical tail</summary>',
-              '',
-              '~~~text',
-              tail('built-pages-smoke.log'),
-              '~~~',
-              '</details>',
-              '',
-              '<details><summary>Lint technical tail</summary>',
-              '',
-              '~~~text',
-              tail('lint.log'),
-              '~~~',
-              '</details>',
-              '',
-              '<details><summary>Public URL technical tail</summary>',
-              '',
-              '~~~text',
-              tail('public-pages-smoke.log'),
-              '~~~',
-              '</details>'
-            ].join('\n');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 101,
-              body
-            });
-      - name: Enforce built Pages runtime result
-        if: steps.built_pages_smoke.outputs.exit_code != '0'
-        shell: pwsh
-        run: exit 1
+        run: npm run smoke:pages
       - name: Electron desktop startup smoke test
-        id: electron_startup
         timeout-minutes: 2
         run: npm run capture
         env:
           FINANCE_CAPTURE_PATH: ${{ runner.temp }}/onestep-money-startup.png
           FINANCE_USER_DATA_PATH: ${{ runner.temp }}/onestep-money-user-data
       - name: Windows packaging smoke test
-        id: windows_packaging
         timeout-minutes: 15
         run: npm run dist:win -- --publish never
-      - name: Report final recovery-branch verification
-        if: github.ref == 'refs/heads/fix/github-pages-demo-recovery' && always()
-        uses: actions/github-script@v8
-        env:
-          TEST_OUTCOME: ${{ steps.tests.outcome }}
-          CHECK_OUTCOME: ${{ steps.checks.outcome }}
-          LINT_EXIT: ${{ steps.lint.outputs.exit_code }}
-          BUILT_EXIT: ${{ steps.built_pages_smoke.outputs.exit_code }}
-          ELECTRON_OUTCOME: ${{ steps.electron_startup.outcome }}
-          PACKAGING_OUTCOME: ${{ steps.windows_packaging.outcome }}
-        with:
-          script: |
-            const body = [
-              '### Final recovery-branch verification',
-              '',
-              `Commit: ${context.sha}`,
-              `Tests: ${process.env.TEST_OUTCOME || 'not-run'}`,
-              `Project/privacy checks: ${process.env.CHECK_OUTCOME || 'not-run'}`,
-              `Lint exit: ${process.env.LINT_EXIT || 'not-run'}`,
-              `Built Pages runtime exit: ${process.env.BUILT_EXIT || 'not-run'}`,
-              `Electron desktop startup: ${process.env.ELECTRON_OUTCOME || 'not-run'}`,
-              `Windows packaging: ${process.env.PACKAGING_OUTCOME || 'not-run'}`
-            ].join('\n');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 101,
-              body
-            });
 
   release-windows:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -184,12 +63,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - id: tests
-        run: npm test
-      - id: checks
-        run: npm run check
-      - id: lint
-        run: npm run lint
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
       - run: npm run release:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
