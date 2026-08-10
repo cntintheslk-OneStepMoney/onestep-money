@@ -6,14 +6,14 @@
     <meta name="description" content="Explore OneStep Money with a fictional, private, resettable browser demo." />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" />
     <title>OneStep Money — Interactive Demo</title>
-    <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/demo/demo.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./demo/demo.css" />
   </head>
   <body>
     <a class="skip-link" href="#demoMain">Skip to demo content</a>
 
     <dialog id="demoWelcome" class="demo-welcome" open aria-labelledby="demoWelcomeTitle">
-      <div class="demo-welcome-mark"><img src="/assets/onestep-money-icon.png" alt="" /></div>
+      <div class="demo-welcome-mark"><img src="./assets/onestep-money-icon.png" alt="" /></div>
       <p class="eyebrow">INTERACTIVE FICTIONAL DEMO</p>
       <h1 id="demoWelcomeTitle">See how OneStep makes money feel manageable</h1>
       <p>Explore a made-up financial month for Alex Rowan. Change categories, work through Review Inbox, test Financial Safety and reset whenever you like.</p>
@@ -31,7 +31,7 @@
     <div id="demoShell" class="app-shell demo-shell">
       <aside class="sidebar">
         <div class="brand">
-          <img class="brand-mark" src="/assets/onestep-money-icon.png" alt="" aria-hidden="true" />
+          <img class="brand-mark" src="./assets/onestep-money-icon.png" alt="" aria-hidden="true" />
           <div class="brand-copy"><strong><span>OneStep</span> <span>Money</span></strong><span>One clear move at a time.</span></div>
         </div>
         <div class="demo-badge"><span aria-hidden="true">◆</span><span><strong>Browser Demo</strong>Fictional data only</span></div>
@@ -142,6 +142,6 @@
     </dialog>
 
     <div id="demoToast" class="toast demo-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
-    <script type="module" src="/demo/demo-app.js"></script>
+    <script type="module" src="./demo/demo-app.js"></script>
   </body>
 </html>

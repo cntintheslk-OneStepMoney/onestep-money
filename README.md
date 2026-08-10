@@ -113,6 +113,14 @@ Open `http://127.0.0.1:3000`. The demo uses one canonical fictional dataset and 
 
 The demo does not accept real financial documents, create a OneStep account, store financial data in a cloud backend, load analytics or weaken the Electron desktop vault. Desktop-only workflows are either demonstrated with prepared fictional fixtures or labelled as available only in the Windows app. `npm run preview` remains an alias for the same browser-demo server; the desktop-only preview is available at `/desktop-preview`.
 
+### Public GitHub Pages deployment
+
+The public demo is designed to run at [https://cntintheslk-onestepmoney.github.io/onestep-money/](https://cntintheslk-onestepmoney.github.io/onestep-money/).
+
+After the Pages deployment PR is merged, open **Repository Settings → Pages** and set **Source** to **GitHub Actions**. The `Deploy browser demo to GitHub Pages` workflow then deploys relevant changes from `main` automatically and can also be started manually from the Actions tab.
+
+The workflow builds an explicit public allowlist with `npm run build:pages`. It does not publish the Electron application, private storage/import code, tests, packaging output, documents, credentials or financial data. No Jekyll template, second repository, external host or backend is required.
+
 ## Build Windows installer
 
 ```sh
