@@ -27,6 +27,7 @@ import {
   compareLabels, DASHBOARD_MODULES, defaultDashboardSettings, moveDashboardModule,
   normaliseDashboardSettings, THEMES, visibleDashboardModules
 } from './presentation-settings.js';
+import { resolveTransactionBudgetAssignment } from './transaction-categorisation.js';
 
 let state;
 let encryption;
@@ -1021,10 +1022,14 @@ function renderTransactions() {
     description.className = 'description-cell';
     append(description, element('strong', '', item.userDescription || item.description));
     if (item.userDescription) description.append(element('span', '', item.description));
+    if (item.merchantName && normalisedText(item.merchantName) !== normalisedText(item.userDescription || item.description)) {
+      description.append(element('span', '', `Merchant / payee: ${item.merchantName}`));
+    }
     const badges = document.createElement('span');
     badges.className = 'note-preview';
-    badges.textContent = isIncomePayment(item) ? INCOME_PAYMENT_CATEGORY
+    const purpose = isIncomePayment(item) ? INCOME_PAYMENT_CATEGORY
       : ledgerIndex.budgetByTransaction.get(item.id)?.category || (ledgerIndex.uncategorised.has(item.id) ? 'Uncategorised' : item.category || 'Not included in budget');
+    badges.textContent = `Purpose: ${purpose}`;
     if (item.transferStatus !== 'no') badges.textContent += ` · ${item.transferStatus} transfer`;
     if (item.duplicateStatus === 'possible') {
       const duplicateLabel = item.reviewStatus === 'accepted' ? 'accepted possible duplicate'
@@ -1621,10 +1626,10 @@ function editorDefinitions(type) {
   ];
   if (type === 'transaction') return [
     ['accountId', 'Account', 'select', alphabeticalOptions(state.accounts.map((account) => [account.id, account.name]))], ['date', 'Date', 'date'],
-    ['description', 'Statement / payment description', 'text', 'Required', 'wide-field'], ['userDescription', 'Your description', 'text', 'Optional clearer name', 'wide-field'],
+    ['description', 'Statement / payment description', 'text', 'Required', 'wide-field'], ['merchantName', 'Merchant / payee (who was paid)', 'text', 'Optional. Kept separate from the purpose.', 'wide-field'], ['userDescription', 'Your description', 'text', 'Optional clearer name', 'wide-field'],
     ['incoming', 'Incoming', 'number'], ['outgoing', 'Outgoing', 'number'], ['runningBalance', 'Running balance', 'number'],
-    ['budgetCategoryId', 'Payment category', 'select', paymentCategoryOptions()],
-    ['category', 'Statement category label', 'text'],
+    ['budgetCategoryId', 'Transaction purpose / budget category (what it was for)', 'select', paymentCategoryOptions()],
+    ['category', 'Imported / statement category label', 'text'],
     ['budgetTreatment', 'Budget treatment', 'select', [['auto','Automatic'],['spending','Spending'],['refund','Refund'],['reversal','Reversal'],['transfer','Internal transfer'],['savings_transfer','Savings transfer'],['debt_payment','Debt payment'],['ignored','Do not include']]],
     ['transferStatus', 'Internal transfer match', 'select', [['no','No'],['possible','Possible'],['confirmed','Confirmed']], '', 'semantic'], ['recurring', 'Recurring payment', 'checkbox'], ['notes', 'Notes', 'textarea', '', 'wide-field']
   ];
@@ -2256,14 +2261,7 @@ function transactionEditorItem(transaction) {
 }
 
 function legacyBudgetIdForTransaction(transaction) {
-  const category = normalisedText(transaction.category);
-  const description = normalisedText(transaction.description);
-  const matches = state.budgets.filter((budget) => {
-    const categories = (budget.categories?.length ? budget.categories : [budget.category]).map(normalisedText);
-    const merchantTerms = (budget.merchantTerms || []).map(normalisedText).filter(Boolean);
-    return (category && categories.includes(category)) || (Number(transaction.outgoing || 0) > 0 && merchantTerms.some((term) => description.includes(term)));
-  });
-  return matches.length === 1 ? matches[0].id : '';
+  return resolveTransactionBudgetAssignment(transaction, { budgets: state.budgets, transactions: state.transactions }).budget?.id || '';
 }
 
 function normalisedText(value) { return String(value || '').trim().toLowerCase().replace(/\s+/g, ' '); }

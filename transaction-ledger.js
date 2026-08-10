@@ -41,7 +41,7 @@ export function filterTransactionLedger(index, filters = {}) {
     if (!['all', 'uncategorised', INCOME_PAYMENT_CATEGORY_VALUE].includes(category) && budget?.id !== category) return false;
 
     if (search) {
-      const searchable = [item.description, item.userDescription, budget?.category, item.category, item.notes]
+      const searchable = [item.description, item.merchantName, item.userDescription, budget?.category, item.category, item.notes]
         .join(' ')
         .toLowerCase();
       if (!searchable.includes(search)) return false;

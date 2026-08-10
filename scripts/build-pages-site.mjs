@@ -18,7 +18,8 @@ export const PAGE_FILES = Object.freeze([
   ['financial-reporting.js', 'financial-reporting.js'],
   ['next-move-priority.js', 'next-move-priority.js'],
   ['presentation-settings.js', 'presentation-settings.js'],
-  ['review-lifecycle.js', 'review-lifecycle.js']
+  ['review-lifecycle.js', 'review-lifecycle.js'],
+  ['transaction-categorisation.js', 'transaction-categorisation.js']
 ]);
 
 export async function buildPagesSite(options = {}) {
