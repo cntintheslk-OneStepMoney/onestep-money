@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { buildPagesSite, PAGE_FILES } from '../scripts/build-pages-site.mjs';
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('Pages build contains only the explicit public demo allowlist', async (context) => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-pages-'));
