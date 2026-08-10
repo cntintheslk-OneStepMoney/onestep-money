@@ -28,7 +28,7 @@
     "dist:win": "electron-builder --win nsis",
     "release:win": "electron-builder --win nsis --publish always",
     "build:pages": "node scripts/build-pages-site.mjs",
-    "smoke:pages": "electron scripts/pages-runtime-smoke.mjs"
+    "smoke:pages": "electron scripts/pages-runtime-smoke.cjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.3",
