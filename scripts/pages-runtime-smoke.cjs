@@ -36,14 +36,18 @@ async function runSmoke() {
     }
   });
 
-  browserWindow.webContents.on('console-message', (_event, level, message) => {
-    if (level >= 3) runtimeErrors.push(String(message || 'Browser console error'));
+  browserWindow.webContents.on('console-message', (details) => {
+    const message = String(details?.message || 'Browser console error');
+    const ignoredMetaPolicyWarning = message.includes("The Content Security Policy directive 'frame-ancestors' is ignored");
+    if (details?.level === 'error' && !ignoredMetaPolicyWarning) runtimeErrors.push(message);
   });
   browserWindow.webContents.on('render-process-gone', (_event, details) => {
     runtimeErrors.push(`Renderer stopped: ${details.reason}`);
   });
 
   await browserWindow.loadURL(targetUrl);
+  await new Promise((resolve) => { setTimeout(resolve, 100); });
+  if (runtimeErrors.length) throw new Error(`Pages runtime emitted ${runtimeErrors.length} browser error(s): ${runtimeErrors[0]}`);
   const result = await browserWindow.webContents.executeJavaScript(`
     (async () => {
       const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
@@ -61,6 +65,8 @@ async function runSmoke() {
       };
 
       expect(Boolean(document.querySelector('.demo-badge')), 'Expected the allowlisted Browser Demo artifact.');
+      expect(document.documentElement.dataset.demoStartup === 'ready', 'Demo did not report successful startup.');
+      expect(requireNode('#demoStartupError', 'startup failure panel').hidden, 'Startup failure panel remained visible.');
       const welcome = requireNode('#demoWelcome', 'welcome dialog');
       expect(welcome.open, 'Welcome dialog did not open.');
       expect(welcome.matches(':modal'), 'Welcome dialog is not modal.');
@@ -104,7 +110,7 @@ async function startBuiltPagesServer() {
   server = http.createServer(async (request, response) => {
     try {
       const requestPath = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
-      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\\/+/, '');
+      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
       const filePath = path.resolve(output, relativePath);
       const relative = path.relative(output, filePath);
       if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid path');
