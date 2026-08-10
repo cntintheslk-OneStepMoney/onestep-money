@@ -37,7 +37,9 @@ async function runSmoke() {
   });
 
   browserWindow.webContents.on('console-message', (details) => {
-    if (details?.level === 'error') runtimeErrors.push(String(details.message || 'Browser console error'));
+    const message = String(details?.message || 'Browser console error');
+    const ignoredMetaPolicyWarning = message.includes("The Content Security Policy directive 'frame-ancestors' is ignored");
+    if (details?.level === 'error' && !ignoredMetaPolicyWarning) runtimeErrors.push(message);
   });
   browserWindow.webContents.on('render-process-gone', (_event, details) => {
     runtimeErrors.push(`Renderer stopped: ${details.reason}`);
