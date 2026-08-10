@@ -27,7 +27,8 @@
     "capture": "electron . --capture-ui",
     "dist:win": "electron-builder --win nsis",
     "release:win": "electron-builder --win nsis --publish always",
-    "build:pages": "node scripts/build-pages-site.mjs"
+    "build:pages": "node scripts/build-pages-site.mjs",
+    "smoke:pages": "electron scripts/pages-runtime-smoke.mjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.3",
