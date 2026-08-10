@@ -9,6 +9,7 @@ export const PAGE_FILES = Object.freeze([
   ['styles.css', 'styles.css'],
   ['demo/demo.css', 'demo/demo.css'],
   ['demo/demo-app.js', 'demo/demo-app.js'],
+  ['demo/demo-bootstrap.js', 'demo/demo-bootstrap.js'],
   ['demo/demo-data.js', 'demo/demo-data.js'],
   ['demo/demo-state.js', 'demo/demo-state.js'],
   ['assets/onestep-money-icon.png', 'assets/onestep-money-icon.png'],
