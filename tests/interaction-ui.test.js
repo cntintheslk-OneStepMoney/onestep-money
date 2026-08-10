@@ -125,7 +125,7 @@ test('Dashboard supports persisted modes, accessible personalisation and authori
   assert.match(css, /\.dashboard-customisation-row/);
 });
 
-test('Payments charts, text alternatives and complete theme controls are present without remote assets', async () => {
+test('Payments charts, text alternatives and accessible theme controls are present without remote assets', async () => {
   const [html, renderer, css] = await Promise.all([
     fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
     fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
@@ -134,8 +134,24 @@ test('Payments charts, text alternatives and complete theme controls are present
   for (const id of ['moneyInOutChart', 'spendingTrendChart', 'categoryChart', 'recurringChart']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(renderer, /buildFinancialReport\(state\)/);
   assert.match(renderer, /chartDataTable\(points\)/);
-  assert.match(html, /id="themeSelect"[\s\S]*value="system"[\s\S]*value="light"[\s\S]*value="dark"/);
+  assert.match(html, /id="themeControl"[^>]*aria-describedby="themeHelp"[\s\S]*name="appearance-theme" value="system"[\s\S]*name="appearance-theme" value="light"[\s\S]*name="appearance-theme" value="dark"/);
+  assert.match(html, /<fieldset[^>]*id="themeControl"[\s\S]*<legend>Theme<\/legend>/);
+  assert.match(renderer, /querySelectorAll\('input\[name="appearance-theme"\]'\)[\s\S]*addEventListener\('change', saveThemePreference\)/);
+  assert.match(renderer, /const theme = event\?\.target\?\.value;[\s\S]*state\.settings\.appearance\.theme = THEMES\.includes\(theme\) \? theme : 'system'/);
+  assert.match(renderer, /input\.checked = input\.value === theme/);
   assert.match(renderer, /matchMedia\('\(prefers-color-scheme: dark\)'\)/);
   assert.match(css, /:root\[data-theme="dark"\]/);
+  assert.match(css, /\.theme-option input:checked \+ span::after \{ content: "✓"/);
+  assert.match(css, /\.theme-option input:focus-visible \+ span/);
   assert.doesNotMatch(html, /https?:\/\//);
+});
+
+test('confirmed shared surfaces use theme-aware semantic tokens', async () => {
+  const css = await fs.readFile(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.streak-chip, \.time-chip, \.status-pill \{[\s\S]*?background: var\(--surface-raised\)/);
+  assert.match(css, /\.secondary-button, \.edit-button \{[^}]*background: var\(--control-surface\)/);
+  assert.match(css, /\.check-card \{[^}]*background: var\(--surface-subtle\)/);
+  assert.match(css, /\.review-summary-counts span \{[^}]*background: var\(--surface-raised\)/);
+  assert.match(css, /\.review-card \{[^}]*background: var\(--surface-raised\)/);
+  assert.match(css, /\.review-card-detail \{[^}]*color: var\(--ink-soft\)/);
 });
