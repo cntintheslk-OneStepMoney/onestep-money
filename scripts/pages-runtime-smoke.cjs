@@ -36,9 +36,8 @@ async function runSmoke() {
     }
   });
 
-  browserWindow.webContents.on('console-message', (_event, details) => {
-    const level = Number(details?.level ?? 0);
-    if (level >= 3) runtimeErrors.push(String(details?.message || 'Browser console error'));
+  browserWindow.webContents.on('console-message', (details) => {
+    if (details?.level === 'error') runtimeErrors.push(String(details.message || 'Browser console error'));
   });
   browserWindow.webContents.on('render-process-gone', (_event, details) => {
     runtimeErrors.push(`Renderer stopped: ${details.reason}`);
