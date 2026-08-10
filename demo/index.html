@@ -10,6 +10,15 @@
     <link rel="stylesheet" href="./demo/demo.css" />
   </head>
   <body>
+    <section id="demoStartupError" class="demo-startup-error" role="alert" hidden>
+      <div class="demo-startup-error-card">
+        <p class="eyebrow">DEMO STARTUP</p>
+        <h1>The browser demo couldn’t start</h1>
+        <p>No financial information was loaded or sent anywhere. Refresh the page to try again. If this continues, the Windows app remains available as the full private local-first experience.</p>
+        <button class="primary-button" type="button" onclick="location.reload()">Refresh demo</button>
+      </div>
+    </section>
+
     <a class="skip-link" href="#demoMain">Skip to demo content</a>
 
     <dialog id="demoWelcome" class="demo-welcome" open aria-labelledby="demoWelcomeTitle">
@@ -142,6 +151,7 @@
     </dialog>
 
     <div id="demoToast" class="toast demo-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <script src="./demo/demo-bootstrap.js"></script>
     <script type="module" src="./demo/demo-app.js"></script>
   </body>
 </html>
