@@ -104,7 +104,7 @@ async function startBuiltPagesServer() {
   server = http.createServer(async (request, response) => {
     try {
       const requestPath = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
-      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\\/+/, '');
+      const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
       const filePath = path.resolve(output, relativePath);
       const relative = path.relative(output, filePath);
       if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Invalid path');
