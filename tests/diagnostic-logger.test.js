@@ -59,7 +59,7 @@ test('priority diagnostics retain only privacy-safe technical references', async
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const logger = createLogger(directory);
 
-  await logger.record('PRIORITY_EVALUATION_FAILED', { amount: 999, description: 'Private payment detail' });
+  await logger.record('PRIORITY_EVALUATION_FAILED', { amount: 999123.45, description: 'Private payment detail' });
   await logger.record('NEXT_MOVE_UNAVAILABLE', { account: 'Private account' });
   await logger.record('ACTION_CONSOLIDATION_INVALID', { merchant: 'Private merchant' });
   const report = await logger.buildReport();
@@ -67,7 +67,7 @@ test('priority diagnostics retain only privacy-safe technical references', async
   assert.match(report.text, /UI-105 PRIORITY_EVALUATION_FAILED/);
   assert.match(report.text, /UI-106 NEXT_MOVE_UNAVAILABLE/);
   assert.match(report.text, /UI-107 ACTION_CONSOLIDATION_INVALID/);
-  assert.doesNotMatch(report.text, /999|Private payment|Private account|Private merchant/);
+  assert.doesNotMatch(report.text, /999123\.45|Private payment|Private account|Private merchant/);
 });
 
 test('parser compatibility diagnostics retain only approved classifications', async (t) => {
