@@ -54,6 +54,12 @@ export function reviewItemPresentation(item, state, now = new Date()) {
   return item?.type === 'missing_income' ? missingPresentation(state, item, now) : base.reviewItemPresentation(item, state);
 }
 
+// Keep the renderer-facing merchant/payee precedence explicit at this integration boundary.
+// This mirrors the established Review presentation contract while legacy item rendering delegates to the base module.
+export function reviewMerchantLabel(transaction) {
+  return transaction?.merchantName || transaction?.userDescription || transaction?.description || 'Payment';
+}
+
 export function startReviewItem(state, itemId, now = new Date()) {
   synchroniseReviewItems(state, now);
   const item = requireOpenItem(state, itemId);
@@ -65,7 +71,7 @@ export function startReviewItem(state, itemId, now = new Date()) {
 export function snoozeReviewItem(state, itemId, choice, now = new Date()) {
   synchroniseReviewItems(state, now);
   const item = requireOpenItem(state, itemId);
-  const payday = nextDependablePayday(state, now)?.date || null;
+  const payday = nextDependablePayday(state, now)?.date || legacyPaydayDate(state.profile?.paydayDay, now);
   const snoozedUntil = snoozeUntil(choice, now, payday);
   if (!snoozedUntil) {
     const error = new Error(choice === 'payday' ? 'Payday is not known yet.' : 'Choose a supported snooze time.');
@@ -201,6 +207,27 @@ function missingPresentation(state, item, now) {
     action: 'Review payday',
     consequence: 'Correcting the schedule or receiving the income clears this item.'
   };
+}
+
+function legacyPaydayDate(paydayDay, now) {
+  const day = knownPaydayDay(paydayDay);
+  if (!day) return null;
+  const date = validDate(now);
+  let year = date.getFullYear();
+  let month = date.getMonth() + 1;
+  const today = `${year}-${String(month).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  let candidate = monthDate(year, month, day);
+  if (candidate < today) {
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+    candidate = monthDate(year, month, day);
+  }
+  return candidate;
+}
+
+function monthDate(year, month, day) {
+  const finalDay = new Date(year, month, 0).getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(Math.min(day, finalDay)).padStart(2, '0')}`;
 }
 
 function snoozeUntil(choice, now, paydayDate) {
