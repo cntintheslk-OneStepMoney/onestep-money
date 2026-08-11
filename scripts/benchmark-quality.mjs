@@ -1,14 +1,23 @@
 import { performance } from 'node:perf_hooks';
+import { AUTOMATION_TRIGGER, createAutomationTrigger, evaluateAutomationRules } from '../automation-engine.js';
+import { buildCashFlowForecast } from '../cash-flow-forecast.js';
+import { buildDebtRecommendation } from '../debt-recommendation-engine.js';
 import {
   buildNextAction, calculateBudgetAnalysis, calculatePeriodSummary
 } from '../finance-core.js';
 import { financialSnapshot } from '../local-llm-service.js';
+import { buildPaydayAllocationPlan } from '../payday-allocation.js';
 import { buildStatementImportPlan } from '../statement-intelligence.js';
 import {
   buildTransactionLedgerIndex, filterTransactionLedger, paginateTransactionLedger
 } from '../transaction-ledger.js';
+import { buildUnifiedFinancialProfile } from '../unified-financial-profile.js';
 
 const sizes = [1_000, 5_000, 10_000];
+const benchmarkNow = new Date('2026-08-11T12:00:00.000Z');
+const automationTrigger = createAutomationTrigger(AUTOMATION_TRIGGER.TRANSACTION_CHANGE, {
+  sourceType: 'transaction', sourceId: 'transaction-0', occurredAt: benchmarkNow.toISOString()
+});
 const results = sizes.map(runScenario);
 console.log(JSON.stringify({ benchmark: 'fictional-large-dataset', unit: 'milliseconds', results }, null, 2));
 
@@ -20,6 +29,21 @@ function runScenario(size) {
   timings.dashboardPeriodSummary = measure(() => calculatePeriodSummary(loadedState));
   let budgetAnalysis;
   timings.budgetRecalculation = measure(() => { budgetAnalysis = calculateBudgetAnalysis(loadedState); });
+  let unifiedProfile;
+  timings.unifiedFinancialProfile = measure(() => {
+    unifiedProfile = buildUnifiedFinancialProfile(loadedState, { now: benchmarkNow });
+  });
+  timings.automationRuleEvaluation = measure(() => evaluateAutomationRules(loadedState, automationTrigger, []));
+  let cashFlowForecast;
+  timings.cashFlowForecast = measure(() => {
+    cashFlowForecast = buildCashFlowForecast(loadedState, { now: benchmarkNow, profile: unifiedProfile });
+  });
+  timings.debtRecommendation = measure(() => buildDebtRecommendation(loadedState, {
+    now: benchmarkNow, profile: unifiedProfile, forecast: cashFlowForecast
+  }));
+  timings.paydayAllocationPlan = measure(() => buildPaydayAllocationPlan(loadedState, {
+    now: benchmarkNow, profile: unifiedProfile, forecast: cashFlowForecast
+  }));
   let ledgerIndex;
   timings.allTimePaymentsPreparation = measure(() => {
     ledgerIndex = buildTransactionLedgerIndex(loadedState, budgetAnalysis);
@@ -72,6 +96,7 @@ function fictionalState(size) {
     };
   });
   return {
+    meta: { revision: 1 },
     profile: { name: '', currency: 'GBP', dependableIncome: 2_100 },
     settings: { selectedMonth: 'all', extraDebtPayment: 50, emergencyBufferTarget: 500, emergencyBufferBalance: 100 },
     accounts,

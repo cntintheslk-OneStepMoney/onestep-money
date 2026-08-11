@@ -21,3 +21,11 @@ test('runtime display and Windows artifact naming derive from package metadata',
   assert.match(renderer, /window\.financeAPI\.getAppVersion\(\)/);
   assert.doesNotMatch(renderer, new RegExp(`v${packageJson.version.replaceAll('.', '\\.')}`));
 });
+
+test('the current package version has consolidated changelog coverage', () => {
+  const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const changelog = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  const escapedVersion = packageJson.version.replaceAll('.', '\\.');
+
+  assert.match(changelog, new RegExp(`^## ${escapedVersion}(?:\\s|$)`, 'm'));
+});
