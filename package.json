@@ -1,6 +1,6 @@
 {
   "name": "onestep-money",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "A local-first, ADHD-friendly UK finance and debt companion built around one clear move at a time.",
   "private": true,
   "type": "module",
@@ -59,6 +59,7 @@
       "automation-rules.js",
       "automation-rules-ui.js",
       "automation-state.js",
+      "core-interactions.js",
       "financial-reminders.js",
       "financial-reminders-ui.js",
       "financial-presentation-forecast.js",
