@@ -1,6 +1,22 @@
-import { AUTOMATION_EXECUTION_STATUS, AUTOMATION_REASON } from './automation-engine.js';
 import { normaliseAutomationState } from './automation-state.js';
 import { deriveRecurringPatterns, RECURRING_CONFIDENCE } from './recurring-finance.js';
+
+const AUTOMATION_EXECUTION_STATUS = Object.freeze({
+  APPLIED: 'applied',
+  ALREADY_APPLIED: 'already_applied',
+  BLOCKED: 'blocked',
+  REVIEW_REQUIRED: 'review_required'
+});
+
+const AUTOMATION_REASON = Object.freeze({
+  APPLIED: 'applied',
+  MANUAL_OVERRIDE: 'manual_override',
+  REVIEW_REQUIRED: 'review_required',
+  SOURCE_INFORMATION_MISSING: 'source_information_missing',
+  SOURCE_INFORMATION_CONFLICTING: 'source_information_conflicting',
+  FINANCIAL_SAFETY_REQUIRED: 'financial_safety_required',
+  FINANCIAL_SAFETY_BLOCKED: 'financial_safety_blocked'
+});
 
 export const AUTOMATION_REVIEW_TYPE = Object.freeze({
   RULE_CONFLICT: 'automation_rule_conflict',
