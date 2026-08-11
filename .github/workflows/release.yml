@@ -81,7 +81,6 @@ jobs:
       - run: npm test
       - run: npm run check
       - run: npm run lint
-      - name: Build and publish Windows release
-        run: npm run release:win
+      - run: npm run release:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
