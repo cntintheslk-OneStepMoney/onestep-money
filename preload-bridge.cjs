@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
+  previewAutomationRules: (state, options) => ipcRenderer.invoke('automation:preview', state, options),
+  runAutomationRules: (state, options) => ipcRenderer.invoke('automation:run', state, options),
   retryRecovery: () => ipcRenderer.invoke('recovery:retry'),
   restoreRecoveryBackup: (backupId) => ipcRenderer.invoke('recovery:restore-backup', backupId),
   selectRecoveryPortableBackup: (passphrase) => ipcRenderer.invoke('recovery:select-portable-backup', passphrase),

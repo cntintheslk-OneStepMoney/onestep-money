@@ -19,7 +19,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
 
   let current = (await store.loadState()).state;
   assert.equal(current.schemaVersion, 10);
-  assert.deepEqual(current.automation, { version: 1, enabled: true, executions: {}, manualOverrides: {} });
+  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], executions: {}, manualOverrides: {} });
 
   current.transactions.push(fictionalTransaction());
   current = await store.saveState(current);
