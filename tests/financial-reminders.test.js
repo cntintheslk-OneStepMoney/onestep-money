@@ -57,7 +57,7 @@ test('confirmed recurring commitment generates; uncertain pattern does not', () 
   assert.equal(state.tasks[0].title, 'Fictional Broadband is coming up');
 });
 
-test('global pause blocks creation and pauses existing local and rule reminders without deleting configuration', () => {
+test('global pause blocks reminder generation and pauses existing local and rule reminders without deleting configuration', () => {
   let state = baseState(); state.scheduledPayments.push({ id: 'subscription', title: 'Fictional subscription', dueDate: '2026-08-12' });
   state = setFinancialReminderConfiguration(state, { sourceType: 'scheduled_payment', sourceId: 'subscription', enabled: true, daysBefore: 3 }, new Date('2026-08-10T12:00:00Z'));
   state.automation.enabled = false;
@@ -72,7 +72,7 @@ test('global pause blocks creation and pauses existing local and rule reminders 
   assert.equal(state.tasks.filter((task) => task.source === 'financial_reminder').length, 1);
 });
 
-test('pausing after creation preserves completion lifecycle when re-enabled', () => {
+test('pausing after generation preserves completion lifecycle when re-enabled', () => {
   const state = baseState(); state.scheduledPayments.push({ id: 'loan', title: 'Fictional loan', dueDate: '2026-08-11' });
   synchroniseFinancialReminders(state, new Date('2026-08-11T09:00:00+01:00'));
   state.tasks[0].completedAt = '2026-08-11T09:05:00.000Z';
