@@ -18,6 +18,8 @@ export const PAGE_FILES = Object.freeze([
   ['financial-reporting.js', 'financial-reporting.js'],
   ['next-move-priority.js', 'next-move-priority.js'],
   ['presentation-settings.js', 'presentation-settings.js'],
+  ['recurring-finance.js', 'recurring-finance.js'],
+  ['recurring-finance-ui.js', 'recurring-finance-ui.js'],
   ['review-lifecycle.js', 'review-lifecycle.js'],
   ['transaction-categorisation.js', 'transaction-categorisation.js']
 ]);
