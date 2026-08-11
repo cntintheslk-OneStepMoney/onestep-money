@@ -1,3 +1,4 @@
+import { automationReviewPrioritySource } from './automation-review-integration.js';
 import {
   activeReviewItems, groupReviewItems, reviewItemPresentation, synchroniseReviewItems
 } from './review-lifecycle.js';
@@ -309,6 +310,7 @@ function sourceRecord(item, state) {
   if (item.sourceType === 'document') return (state.documents || []).find((entry) => String(entry.id) === item.sourceId) || null;
   if (item.sourceType === 'importBatch') return (state.importBatches || []).find((entry) => String(entry.id) === item.sourceId) || null;
   if (item.sourceType === 'task') return (state.tasks || []).find((entry) => String(entry.id) === item.sourceId) || null;
+  if (item.sourceType === 'automation_review' || item.sourceType === 'recurring_pattern') return automationReviewPrioritySource(state, item);
   return null;
 }
 
