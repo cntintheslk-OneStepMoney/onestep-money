@@ -64,6 +64,8 @@
       "payslip-record.js",
       "preload-bridge.cjs",
       "presentation-settings.js",
+      "recurring-finance.js",
+      "recurring-finance-ui.js",
       "renderer-app.js",
       "review-lifecycle.js",
       "credit-report-intelligence.js",
