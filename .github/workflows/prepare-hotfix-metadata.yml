@@ -1,0 +1,46 @@
+name: Prepare v2.2.1 metadata
+
+on:
+  push:
+    branches: [fix/restore-app-interactions]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/restore-app-interactions
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Align lockfile version without dependency changes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'package-lock.json';
+          const lock = JSON.parse(fs.readFileSync(path, 'utf8'));
+          lock.version = '2.2.1';
+          lock.packages[''].version = '2.2.1';
+          fs.writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
+          NODE
+      - name: Remove temporary metadata workflow
+        run: git rm .github/workflows/prepare-hotfix-metadata.yml
+      - name: Commit aligned metadata to hotfix branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "[v2.2.1][Maintenance] Align lockfile release metadata" \
+            -m "Purpose: Keep package and lockfile release metadata consistent for the v2.2.1 hotfix." \
+            -m "Changes: Updated only the root package-lock version fields and removed this temporary preparation workflow." \
+            -m "Verification: JSON parsing is performed before writing; full repository checks run on the final draft PR." \
+            -m "Issue: #145"
+          git push origin HEAD:fix/restore-app-interactions
