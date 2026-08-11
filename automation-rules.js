@@ -30,11 +30,11 @@ export function previewStoredAutomationRules(state, options = {}) {
 export async function runStoredAutomationRules(state, options = {}) {
   let current = withNormalisedRules(state);
   if (current.automation.enabled === false) {
-    return { state: current, changed: false, results: [], conflicts: [] };
+    return { state: current, changed: false, reviewChanged: false, results: [], conflicts: [] };
   }
   if (!current.automation.rules.some((rule) => rule.enabled)) {
     const reviewSync = synchroniseAutomationReviewSignals(current, { conflicts: [], results: [] }, options.now);
-    return { state: reviewSync.state, changed: reviewSync.changed, results: [], conflicts: [] };
+    return { state: reviewSync.state, changed: false, reviewChanged: reviewSync.changed, results: [], conflicts: [] };
   }
   const contexts = evaluationContexts(current, options.now);
   const proposals = evaluateContexts(current, current.automation.rules, contexts, false, options.now);
@@ -77,8 +77,7 @@ export async function runStoredAutomationRules(state, options = {}) {
   }
   const reviewSync = synchroniseAutomationReviewSignals(current, { conflicts: resolution.conflicts, results }, options.now);
   current = reviewSync.state;
-  changed ||= reviewSync.changed;
-  return { state: current, changed, results, conflicts: resolution.conflicts };
+  return { state: current, changed, reviewChanged: reviewSync.changed, results, conflicts: resolution.conflicts };
 }
 
 export function ruleActionHandlers() {
