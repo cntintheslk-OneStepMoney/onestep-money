@@ -124,13 +124,14 @@ test('starter or emergency buffer shortfall is explicitly protected', () => {
 });
 
 test('reduced-than-expected income exposes Budget shortfall and compresses optional allocation first', () => {
-  const state = paydayState({
+  let state = paydayState({
     accounts: [{ id: 'current', name: 'Fictional Current', type: 'current', currentBalance: 650, statementDate: '2026-08-10', active: true }],
     transactions: [receivedIncome(650)],
     scheduledPayments: [{ id: 'bill', name: 'Fictional Bill', amount: 100, dueDate: '2026-08-20', status: 'due', includedInBudget: false }],
     debts: [currentDebt()],
     budgets: [activeBudget('food', 'Food', 300), activeBudget('travel', 'Travel', 200)]
   });
+  state = withIncomeSchedule(state, { expectedAmountRange: { min: 600, max: 2100 } });
   const plan = buildPaydayAllocationPlan(state, { now: NOW });
 
   assert.equal(plan.income.amountReceived, 650);
@@ -186,12 +187,13 @@ test('user-adjusted flexible allowance persists as an explicit override and neve
 });
 
 test('no negative or silently overcommitted plan is recommended when protected needs exceed payday cash', () => {
-  const state = paydayState({
+  let state = paydayState({
     accounts: [{ id: 'current', name: 'Fictional Current', type: 'current', currentBalance: 120, statementDate: '2026-08-10', active: true }],
     transactions: [receivedIncome(120)],
     scheduledPayments: [{ id: 'bill', name: 'Fictional Bill', amount: 150, dueDate: '2026-08-20', status: 'due', includedInBudget: false }],
     budgets: [activeBudget('food', 'Food', 300)]
   });
+  state = withIncomeSchedule(state, { expectedAmountRange: { min: 100, max: 2100 } });
   const plan = buildPaydayAllocationPlan(state, { now: NOW });
 
   assert.equal(plan.status, PAYDAY_ALLOCATION_STATUS.PROTECTED_SHORTFALL);
