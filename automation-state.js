@@ -1,11 +1,12 @@
 import { normaliseAutomationRuleCollection } from './automation-rule-model.js';
+import { normaliseFinancialReminderCollection } from './financial-reminders.js';
 
 const EXECUTION_ID_PATTERN = /^[0-9a-f]{64}$/;
 const SAFE_CODE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,119}$/;
 const MAX_EXECUTIONS = 5000;
 const MAX_MANUAL_OVERRIDES = 1000;
 
-export const AUTOMATION_STATE_VERSION = 1;
+export const AUTOMATION_STATE_VERSION = 2;
 
 export function normaliseAutomationState(value) {
   const automation = isPlainObject(value) ? value : {};
@@ -13,6 +14,7 @@ export function normaliseAutomationState(value) {
     version: AUTOMATION_STATE_VERSION,
     enabled: automation.enabled !== false,
     rules: normaliseAutomationRuleCollection(automation.rules),
+    reminders: normaliseFinancialReminderCollection(automation.reminders),
     executions: normaliseExecutions(automation.executions),
     manualOverrides: normaliseManualOverrides(automation.manualOverrides)
   };

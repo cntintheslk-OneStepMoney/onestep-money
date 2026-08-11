@@ -8,6 +8,7 @@ import {
   evaluateAutomationRules, executeAutomationProposal, setAutomationEnabled
 } from '../automation-engine.js';
 import { FinanceDataStore } from '../data-store.js';
+import { createUserFinancialReminder } from '../financial-reminders.js';
 
 const seedPath = new URL('../seed-data.json', import.meta.url);
 
@@ -19,8 +20,11 @@ test('legacy state migrates automation metadata safely and backup/restore preser
 
   let current = (await store.loadState()).state;
   assert.equal(current.schemaVersion, 10);
-  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], executions: {}, manualOverrides: {} });
+  assert.deepEqual(current.automation, { version: 2, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {} });
 
+  current = createUserFinancialReminder(current, {
+    title: 'Fictional annual renewal', dueDate: '2026-09-01', daysBefore: 7
+  }, new Date('2026-08-10T19:00:00.000Z'));
   current.transactions.push(fictionalTransaction());
   current = await store.saveState(current);
   const trigger = createAutomationTrigger(AUTOMATION_TRIGGER.TRANSACTION_CHANGE, { sourceType: 'transaction', sourceId: 'fictional-automation-record' });
@@ -41,17 +45,22 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   current = (await restarted.loadState()).state;
   assert.equal(current.automation.enabled, false);
   assert.equal(current.automation.executions[executionId].status, 'applied');
+  assert.equal(current.automation.reminders[0].title, 'Fictional annual renewal');
+  assert.equal(current.automation.reminders[0].dueDate, '2026-09-01');
 
   const backupPath = path.join(directory, 'fictional-automation.osmb');
   await restarted.createPortableBackup(backupPath, 'fictional-passphrase', current);
   let changed = setAutomationEnabled(current, true);
   changed.automation.executions = {};
+  changed.automation.reminders = [];
   await restarted.saveState(changed);
 
   const restored = await restarted.restorePortableBackup(backupPath, 'fictional-passphrase');
   assert.equal(restored.status, 'restored');
   assert.equal(restored.state.automation.enabled, false);
   assert.equal(restored.state.automation.executions[executionId].status, 'applied');
+  assert.equal(restored.state.automation.reminders[0].title, 'Fictional annual renewal');
+  assert.equal(restored.state.automation.reminders[0].daysBefore, 7);
 });
 
 function fictionalRule() {

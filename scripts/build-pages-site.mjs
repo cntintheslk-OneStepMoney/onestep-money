@@ -17,6 +17,8 @@ export const PAGE_FILES = Object.freeze([
   ['automation-rules-ui.js', 'automation-rules-ui.js'],
   ['date-utils.js', 'date-utils.js'],
   ['finance-core.js', 'finance-core.js'],
+  ['financial-reminders.js', 'financial-reminders.js'],
+  ['financial-reminders-ui.js', 'financial-reminders-ui.js'],
   ['financial-reporting.js', 'financial-reporting.js'],
   ['next-move-priority.js', 'next-move-priority.js'],
   ['payday-awareness.js', 'payday-awareness.js'],
