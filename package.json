@@ -70,6 +70,7 @@
       "review-lifecycle.js",
       "credit-report-intelligence.js",
       "statement-intelligence.js",
+      "statement-reconciliation.js",
       "transaction-categorisation.js",
       "transaction-ledger.js",
       "seed-data.json",
