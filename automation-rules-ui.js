@@ -1,15 +1,18 @@
 import {
-  AUTOMATION_RULE_ACTION, AUTOMATION_RULE_CONDITION, AUTOMATION_RULE_TRIGGER,
+  AUTOMATION_RULE_ACTION, AUTOMATION_RULE_ACTIVATION, AUTOMATION_RULE_CONDITION, AUTOMATION_RULE_TRIGGER,
   actionLabel, conditionLabel, duplicateAutomationRule, normaliseAutomationRuleState,
   removeAutomationRule, setAutomationRuleEnabled, upsertAutomationRule
 } from './automation-rule-model.js';
 
+const PREVIEW_PAGE_SIZE = 20;
 let state = null;
 let editId = '';
 let draft = null;
 let lastCycleSignature = '';
 let cycleRunning = false;
 let runSummary = null;
+let previewState = null;
+let previewVisibleCount = PREVIEW_PAGE_SIZE;
 
 export function renderAutomationRulesPanel(nextState) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -41,13 +44,14 @@ function render() {
   for (const rule of automation.rules) list.append(ruleCard(rule));
   panel.append(list);
   if (draft) panel.append(ruleForm());
+  if (previewState) panel.append(previewPanel());
 }
 
 function heading(automation) {
   const wrapper = el('div', 'panel-heading');
   const copy = el('div');
   copy.append(el('p', 'eyebrow', 'LOCAL AUTOMATION'), el('h2', '', 'Simple rules'),
-    el('p', 'muted', 'Build small “When… If… Then…” rules. They stay local, use OneStep’s shared safety engine, and never move money or contact an external service.'));
+    el('p', 'muted', 'Build small “When… If… Then…” rules. Test them locally before activation. New and materially changed rules start paused and only affect future matching activity once enabled.'));
   const label = el('label', 'confirmation-check');
   const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = automation.enabled; toggle.dataset.automationGlobal = 'true';
   label.append(toggle, document.createTextNode(automation.enabled ? 'Automations enabled' : 'Automations paused'));
@@ -57,7 +61,7 @@ function heading(automation) {
 
 function statusLine(automation) {
   const output = el('p', 'muted'); output.id = 'automationRulesStatus'; output.setAttribute('role', 'status'); output.setAttribute('aria-live', 'polite');
-  if (!automation.enabled) output.textContent = 'Paused. Rules can still be edited and previewed, but automatic changes are blocked.';
+  if (!automation.enabled) output.textContent = 'Paused. Rules can still be edited and tested, but automatic changes are blocked.';
   else if (runSummary?.conflicts) output.textContent = `${runSummary.conflicts} conflicting rule decision${runSummary.conflicts === 1 ? '' : 's'} need review. No conflicting category was applied.`;
   else if (runSummary?.applied) output.textContent = `${runSummary.applied} safe local automation change${runSummary.applied === 1 ? '' : 's'} applied.`;
   return output;
@@ -69,9 +73,14 @@ function ruleCard(rule) {
   const copy = el('div'); copy.append(el('strong', '', rule.name), el('span', 'muted', rule.explanation));
   head.append(copy, el('span', 'badge', rule.enabled ? 'Enabled' : 'Paused')); card.append(head);
   card.append(el('p', 'muted', `${triggerLabel(rule.trigger)} · ${rule.conditions.map(conditionLabel).join(' · ')} · ${actionLabel(rule.action)}`));
+  if (rule.activationMode === AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY) {
+    card.append(el('p', 'muted', rule.enabled && rule.activatedAt
+      ? `Future activity only · enabled ${formatLocalDateTime(rule.activatedAt)}`
+      : 'Future activity only when enabled · existing records will not be rewritten automatically.'));
+  }
   card.append(buttonRow(
     button('Edit', 'secondary-button', { automationEdit: rule.id }),
-    button('Preview', 'secondary-button', { automationPreview: rule.id }),
+    button('Test Rule', 'secondary-button', { automationPreview: rule.id }),
     button(rule.enabled ? 'Pause rule' : 'Enable rule', 'secondary-button', { automationToggle: rule.id }),
     button('Duplicate', 'secondary-button', { automationDuplicate: rule.id }),
     button('Delete', 'danger-button', { automationDelete: rule.id })
@@ -95,7 +104,13 @@ function ruleForm() {
   form.append(field('Then…', select('ruleAction', actionOptions(draft.trigger), draft.action.type)));
   form.append(field('Action value', actionValueInput(draft.action)));
   const why = field('Why this rule exists', input('ruleExplanation', draft.explanation || '', 'text', false)); why.classList.add('wide-field'); form.append(why);
-  const actions = buttonRow(button(editId ? 'Save rule' : 'Create rule', 'primary-button', {}, 'submit'), button('Cancel', 'secondary-button', { automationCancel: 'true' }));
+  const note = el('p', 'muted', 'Test Rule is read-only. New rules and edits that change matching or actions are saved paused; enabling them later affects future matching activity only.');
+  note.classList.add('wide-field'); form.append(note);
+  const actions = buttonRow(
+    button('Test Rule', 'secondary-button', { automationDraftPreview: 'true' }),
+    button(editId ? 'Save rule' : 'Create rule', 'primary-button', {}, 'submit'),
+    button('Cancel', 'secondary-button', { automationCancel: 'true' })
+  );
   actions.classList.add('wide-field'); form.append(actions);
   return form;
 }
@@ -110,22 +125,79 @@ function conditionRow(condition, index) {
   return row;
 }
 
+function previewPanel() {
+  const wrapper = el('section', 'review-card');
+  wrapper.setAttribute('aria-label', 'Test Rule preview');
+  const result = previewState.result;
+  wrapper.append(el('p', 'eyebrow', 'TEST RULE · LOCAL DRY RUN'), el('h3', '', 'Preview before activation'));
+  const unchanged = el('p', '', result.unchangedMessage || 'Preview only — nothing has been changed.');
+  unchanged.setAttribute('role', 'status'); wrapper.append(unchanged);
+  wrapper.append(el('p', 'muted', `${result.evaluatedCount} existing record${result.evaluatedCount === 1 ? '' : 's'} evaluated · ${result.matchedRecordCount} matched · ${result.wouldApplyCount} would apply · ${result.reviewRequiredCount} need review · ${result.blockedCount} blocked.`));
+  wrapper.append(el('p', 'muted', result.existingImpact?.message || 'Existing data was checked locally.'));
+  wrapper.append(el('p', 'muted', result.futureImpact?.message || 'After activation, future matching activity is handled by this rule.'));
+  wrapper.append(el('p', 'muted', result.retrospective?.message || 'Existing records are never changed automatically by this preview.'));
+
+  if (result.truncated) {
+    wrapper.append(el('p', 'muted', `This rule has a large preview. Details are capped at the first ${result.detailLimit} outcomes; narrow the rule to inspect a smaller set.`));
+  }
+
+  const details = el('div', 'compact-card-list');
+  const visible = (result.items || []).slice(0, previewVisibleCount);
+  if (!visible.length) details.append(el('p', 'muted', 'No matching outcomes to show.'));
+  for (const item of visible) details.append(previewOutcomeCard(item));
+  wrapper.append(details);
+
+  const actions = [];
+  if (previewVisibleCount < (result.items || []).length) actions.push(button('Show 20 more', 'secondary-button', { automationPreviewMore: 'true' }));
+  if (previewState.activationIntent && previewState.ruleId && !rules().find((rule) => rule.id === previewState.ruleId)?.enabled) {
+    actions.push(button('Enable for future activity', 'primary-button', { automationActivate: previewState.ruleId }));
+  }
+  actions.push(button('Close preview', 'secondary-button', { automationPreviewClose: 'true' }));
+  wrapper.append(buttonRow(...actions));
+  return wrapper;
+}
+
+function previewOutcomeCard(item) {
+  const card = el('article', 'review-card');
+  const head = el('div', 'review-card-heading');
+  const copy = el('div'); copy.append(el('strong', '', previewSourceLabel(item)), el('span', 'muted', item.actionLabel || 'Automation action'));
+  head.append(copy, el('span', 'badge', previewStatusLabel(item.status))); card.append(head);
+  card.append(el('p', 'muted', item.explanation || previewReasonLabel(item.reasonCode)));
+  return card;
+}
+
 async function onClick(event) {
   const target = event.target;
-  if (target.closest('[data-automation-create]')) { editId = ''; draft = blankRule(); render(); return; }
-  if (target.closest('[data-automation-cancel]')) { editId = ''; draft = null; render(); return; }
+  if (target.closest('[data-automation-create]')) { editId = ''; draft = blankRule(); clearPreview(); render(); return; }
+  if (target.closest('[data-automation-cancel]')) { editId = ''; draft = null; clearPreview(); render(); return; }
+  if (target.closest('[data-automation-preview-close]')) { clearPreview(); render(); return; }
+  if (target.closest('[data-automation-preview-more]')) { previewVisibleCount += PREVIEW_PAGE_SIZE; render(); return; }
   const edit = target.closest('[data-automation-edit]');
-  if (edit) { const rule = rules().find((item) => item.id === edit.dataset.automationEdit); if (rule) { editId = rule.id; draft = structuredClone(rule); render(); } return; }
+  if (edit) { const rule = rules().find((item) => item.id === edit.dataset.automationEdit); if (rule) { editId = rule.id; draft = structuredClone(rule); clearPreview(); render(); } return; }
   const add = target.closest('[data-condition-add]');
-  if (add) { captureDraft(); if (draft.conditions.length < 8) draft.conditions.push(defaultCondition(draft.trigger)); render(); return; }
+  if (add) { captureDraft(); if (draft.conditions.length < 8) draft.conditions.push(defaultCondition(draft.trigger)); clearPreview(); render(); return; }
   const removeCondition = target.closest('[data-condition-remove]');
-  if (removeCondition) { captureDraft(); draft.conditions.splice(Number(removeCondition.dataset.conditionRemove), 1); render(); return; }
+  if (removeCondition) { captureDraft(); draft.conditions.splice(Number(removeCondition.dataset.conditionRemove), 1); clearPreview(); render(); return; }
+  const draftPreview = target.closest('[data-automation-draft-preview]');
+  if (draftPreview) { captureDraft(); await previewDraftRule(); return; }
   const toggle = target.closest('[data-automation-toggle]');
-  if (toggle) { const rule = rules().find((item) => item.id === toggle.dataset.automationToggle); await persist(setAutomationRuleEnabled(state, rule.id, !rule.enabled), rule.enabled ? 'Rule paused.' : 'Rule enabled.'); return; }
+  if (toggle) {
+    const rule = rules().find((item) => item.id === toggle.dataset.automationToggle);
+    if (!rule) return;
+    if (rule.enabled) {
+      clearPreview();
+      await persist(setAutomationRuleEnabled(state, rule.id, false), 'Rule paused. Existing financial history was left unchanged.');
+    } else {
+      await previewRule(rule.id, { activationIntent: true });
+    }
+    return;
+  }
+  const activate = target.closest('[data-automation-activate]');
+  if (activate) { await activatePreviewedRule(activate.dataset.automationActivate); return; }
   const duplicate = target.closest('[data-automation-duplicate]');
-  if (duplicate) { await persist(duplicateAutomationRule(state, duplicate.dataset.automationDuplicate, createRuleId()), 'Rule duplicated in a paused state.'); return; }
+  if (duplicate) { clearPreview(); await persist(duplicateAutomationRule(state, duplicate.dataset.automationDuplicate, createRuleId()), 'Rule duplicated in a paused state. Test it before enabling it.'); return; }
   const remove = target.closest('[data-automation-delete]');
-  if (remove) { const rule = rules().find((item) => item.id === remove.dataset.automationDelete); if (rule && window.confirm(`Delete “${rule.name}”? Existing financial history will not be reversed.`)) await persist(removeAutomationRule(state, rule.id), 'Rule deleted. Existing history was left unchanged.'); return; }
+  if (remove) { const rule = rules().find((item) => item.id === remove.dataset.automationDelete); if (rule && window.confirm(`Delete “${rule.name}”? Existing financial history will not be reversed.`)) { clearPreview(); await persist(removeAutomationRule(state, rule.id), 'Rule deleted. Existing history was left unchanged.'); } return; }
   const preview = target.closest('[data-automation-preview]');
   if (preview) await previewRule(preview.dataset.automationPreview);
 }
@@ -133,9 +205,10 @@ async function onClick(event) {
 async function onChange(event) {
   if (event.target.matches('[data-automation-global]')) {
     const next = structuredClone(state); next.automation = normaliseAutomationRuleState(next.automation); next.automation.enabled = event.target.checked;
-    await persist(next, event.target.checked ? 'Automations enabled.' : 'All automations paused.'); return;
+    clearPreview(); await persist(next, event.target.checked ? 'Automations enabled.' : 'All automations paused.'); return;
   }
   if (!draft) return;
+  clearPreview();
   if (event.target.id === 'ruleTrigger') {
     captureDraft(); draft.trigger = event.target.value;
     if (draft.trigger === AUTOMATION_RULE_TRIGGER.DATE_BOUNDARY) {
@@ -145,9 +218,7 @@ async function onChange(event) {
     render(); return;
   }
   if (event.target.id === 'ruleAction') {
-    captureDraft();
-    draft.action = { type: event.target.value, value: '' };
-    render(); return;
+    captureDraft(); draft.action = { type: event.target.value, value: '' }; render(); return;
   }
   if (/^condition(Field|Operator)/.test(event.target.id)) {
     captureDraft();
@@ -161,9 +232,23 @@ async function onSubmit(event) {
   if (event.target.id !== 'automationRuleForm') return;
   event.preventDefault(); captureDraft();
   const existing = rules().find((item) => item.id === editId);
+  const materialChanged = !existing || materialRuleChanged(existing, draft);
   try {
-    const next = upsertAutomationRule(state, { ...(existing || {}), ...draft, id: existing?.id || createRuleId(), enabled: existing?.enabled ?? true });
-    editId = ''; draft = null; await persist(next, existing ? 'Rule saved.' : 'Rule created.');
+    const next = upsertAutomationRule(state, {
+      ...(existing || {}),
+      ...draft,
+      id: existing?.id || createRuleId(),
+      enabled: materialChanged ? false : existing.enabled,
+      activationMode: materialChanged ? AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY : existing.activationMode,
+      activatedAt: materialChanged ? null : existing.activatedAt
+    });
+    editId = ''; draft = null; clearPreview();
+    const message = !existing
+      ? 'Rule created in a paused state. Test it, then enable it for future activity.'
+      : materialChanged
+        ? 'Rule saved and paused because its matching or action changed. Test it before enabling it again.'
+        : 'Rule saved.';
+    await persist(next, message);
   } catch (error) { setStatus(error?.message || 'That rule could not be saved.'); }
 }
 
@@ -182,13 +267,45 @@ function captureDraft() {
   });
 }
 
-async function previewRule(ruleId) {
-  if (!window.financeAPI?.previewAutomationRules) { setStatus('Rule preview is available in the desktop app. No data was sent anywhere.'); return; }
-  setStatus('Checking this rule locally…');
+async function previewDraftRule() {
+  const existing = rules().find((item) => item.id === editId);
+  const candidate = {
+    ...(existing || {}), ...structuredClone(draft),
+    id: existing?.id || 'rule_preview_draft',
+    enabled: false,
+    activationMode: AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY,
+    activatedAt: null
+  };
+  await previewRule(candidate.id, { rule: candidate, activationIntent: false });
+}
+
+async function previewRule(ruleId, options = {}) {
+  if (!window.financeAPI?.previewAutomationRules) { setStatus('Test Rule is available in the desktop app. No data was sent anywhere.'); return; }
+  setStatus('Testing this rule locally…');
   try {
-    const result = await window.financeAPI.previewAutomationRules(state, { ruleId, now: new Date().toISOString() });
-    setStatus(`${result.matchCount} matching local action${result.matchCount === 1 ? '' : 's'} found${result.conflicts?.length ? `, with ${result.conflicts.length} conflict${result.conflicts.length === 1 ? '' : 's'}` : ''}. Preview changed nothing.`);
-  } catch (error) { setStatus(error?.message || 'The local preview could not be completed.'); }
+    const result = await window.financeAPI.previewAutomationRules(state, {
+      ruleId,
+      rule: options.rule || null,
+      now: new Date().toISOString()
+    });
+    previewState = { ruleId, result, activationIntent: options.activationIntent === true };
+    previewVisibleCount = PREVIEW_PAGE_SIZE;
+    render();
+    setStatus(`${result.matchedRecordCount} existing record${result.matchedRecordCount === 1 ? '' : 's'} matched. Preview only — nothing has been changed.`);
+  } catch (error) { clearPreview(); render(); setStatus(error?.message || 'The local Test Rule preview could not be completed.'); }
+}
+
+async function activatePreviewedRule(ruleId) {
+  const rule = rules().find((item) => item.id === ruleId);
+  if (!rule || rule.enabled || previewState?.ruleId !== ruleId || !previewState?.result?.nothingChanged) return;
+  const matches = Number(previewState.result.matchedRecordCount || 0);
+  const confirmed = window.confirm(`Enable “${rule.name}” for future matching activity? ${matches} existing matching record${matches === 1 ? '' : 's'} shown by Test Rule will not be changed. Retrospective application is not available in this release.`);
+  if (!confirmed) { setStatus('Activation cancelled. Nothing was changed.'); return; }
+  try {
+    const next = setAutomationRuleEnabled(state, rule.id, true, new Date());
+    clearPreview();
+    await persist(next, 'Rule enabled for future matching activity. Existing records were left unchanged.');
+  } catch (error) { setStatus(error?.message || 'The rule could not be enabled safely.'); }
 }
 
 async function persist(next, message) {
@@ -203,7 +320,7 @@ function scheduleCycle() {
   if (!state || !window.financeAPI?.runAutomationRules || !window.financeAPI?.saveState || cycleRunning) return;
   const automation = normaliseAutomationRuleState(state.automation);
   if (!automation.enabled || !automation.rules.some((rule) => rule.enabled)) return;
-  const signature = `${state.meta?.revision ?? 0}:${automation.rules.map((rule) => `${rule.id}:${rule.enabled}:${rule.updatedAt || ''}`).join('|')}`;
+  const signature = `${state.meta?.revision ?? 0}:${automation.rules.map((rule) => `${rule.id}:${rule.enabled}:${rule.updatedAt || ''}:${rule.activatedAt || ''}`).join('|')}`;
   if (signature === lastCycleSignature) return;
   lastCycleSignature = signature; cycleRunning = true; queueMicrotask(runCycle);
 }
@@ -222,7 +339,14 @@ async function runCycle() {
   finally { cycleRunning = false; }
 }
 
-function blankRule() { return { name: '', enabled: true, trigger: AUTOMATION_RULE_TRIGGER.TRANSACTION_CHANGE, conditions: [defaultCondition(AUTOMATION_RULE_TRIGGER.TRANSACTION_CHANGE)], action: { type: AUTOMATION_RULE_ACTION.ASSIGN_BUDGET, value: '' }, explanation: '' }; }
+function blankRule() {
+  return {
+    name: '', enabled: false, trigger: AUTOMATION_RULE_TRIGGER.TRANSACTION_CHANGE,
+    conditions: [defaultCondition(AUTOMATION_RULE_TRIGGER.TRANSACTION_CHANGE)],
+    action: { type: AUTOMATION_RULE_ACTION.ASSIGN_BUDGET, value: '' }, explanation: '',
+    activationMode: AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY, activatedAt: null
+  };
+}
 function defaultCondition(trigger) { return trigger === AUTOMATION_RULE_TRIGGER.DATE_BOUNDARY ? { id: createConditionId(), field: AUTOMATION_RULE_CONDITION.DAYS_UNTIL_DUE, operator: 'between', value: 0, value2: 3 } : { id: createConditionId(), field: AUTOMATION_RULE_CONDITION.MERCHANT, operator: 'equals', value: '' }; }
 function defaultConditionForField(field, id = createConditionId()) {
   if (field === AUTOMATION_RULE_CONDITION.AMOUNT) return { id, field, operator: 'at_least', value: 0, value2: null };
@@ -243,6 +367,50 @@ function conditionValueInput(condition, index, part) {
   if (condition.field === 'review_state') return select(id, [['none','No review state'],['pending','Pending'],['accepted','Accepted'],['rejected','Rejected'],['in_progress','In progress'],['snoozed','Snoozed']], value);
   return input(id, value, numericCondition(condition.field) ? 'number' : 'text', true);
 }
+function materialRuleChanged(existing, nextDraft) {
+  return JSON.stringify(materialRuleSignature(existing)) !== JSON.stringify(materialRuleSignature(nextDraft));
+}
+function materialRuleSignature(rule) {
+  return {
+    trigger: rule?.trigger || '',
+    conditions: (rule?.conditions || []).map((condition) => ({
+      id: condition?.id || '',
+      field: condition?.field || '',
+      operator: condition?.operator || 'equals',
+      value: normaliseConditionComparisonValue(condition?.field, condition?.value),
+      value2: normaliseConditionComparisonValue(condition?.field, condition?.value2)
+    })),
+    action: { type: rule?.action?.type || '', value: String(rule?.action?.value ?? '') }
+  };
+}
+function normaliseConditionComparisonValue(field, value) {
+  if (value === '' || value === null || value === undefined) return null;
+  if (numericCondition(field)) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : String(value);
+  }
+  return String(value);
+}
+function previewSourceLabel(item) {
+  if (item.sourceType !== 'transaction') return `Recurring item · ${item.sourceId}`;
+  const transaction = (state.transactions || []).find((entry) => String(entry.id) === String(item.sourceId));
+  if (!transaction) return `Payment · ${item.sourceId}`;
+  const label = transaction.merchantName || transaction.payee || transaction.userDescription || transaction.description || 'Payment';
+  const amount = Number(transaction.incoming || 0) > 0 ? Number(transaction.incoming) : Number(transaction.outgoing || 0);
+  const amountText = Number.isFinite(amount) && amount ? ` · ${amount.toFixed(2)}` : '';
+  return `${transaction.date || 'No date'} · ${label}${amountText}`;
+}
+function previewStatusLabel(status) {
+  if (status === 'would_apply') return 'Would apply';
+  if (status === 'conflict') return 'Conflict';
+  if (status === 'review_required') return 'Needs review';
+  if (status === 'blocked') return 'Blocked';
+  if (status === 'already_applied') return 'Already applied';
+  return 'Skipped';
+}
+function previewReasonLabel(reason) { return String(reason || 'preview').replace(/_/g, ' '); }
+function clearPreview() { previewState = null; previewVisibleCount = PREVIEW_PAGE_SIZE; }
+function formatLocalDateTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'recently' : date.toLocaleString(); }
 function numericCondition(field) { return [AUTOMATION_RULE_CONDITION.AMOUNT, AUTOMATION_RULE_CONDITION.DAYS_UNTIL_DUE].includes(field); }
 function rules() { return normaliseAutomationRuleState(state.automation).rules; }
 function triggerLabel(trigger) { return trigger === AUTOMATION_RULE_TRIGGER.DATE_BOUNDARY ? 'When: recurring date' : 'When: payment changes'; }
