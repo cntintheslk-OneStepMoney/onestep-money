@@ -1,4 +1,5 @@
 import { ALL_TIME_PERIOD, isIncomePayment } from './finance-core.js';
+import './payment-bulk-review-ui.js';
 
 export const DEFAULT_TRANSACTION_PAGE_SIZE = 100;
 export const INCOME_PAYMENT_CATEGORY_VALUE = 'payment-category:income';
