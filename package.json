@@ -51,6 +51,7 @@
       "automation-history-ui.js",
       "automation-review-integration.js",
       "automation-rule-model.js",
+      "automation-rules-core.js",
       "automation-rules.js",
       "automation-rules-ui.js",
       "automation-state.js",
