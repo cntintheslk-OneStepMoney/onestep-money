@@ -16,7 +16,7 @@ const MAX_REVIEW_SIGNALS = 500;
 export const MAX_AUTOMATION_HISTORY_ENTRIES = 1000;
 export const MAX_ACTIVE_AUTOMATION_UNDO_ENTRIES = 250;
 
-export const AUTOMATION_STATE_VERSION = 2;
+export const AUTOMATION_STATE_VERSION = 1;
 
 export function normaliseAutomationState(value) {
   const automation = isPlainObject(value) ? value : {};
