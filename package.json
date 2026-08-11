@@ -53,6 +53,7 @@
       "cash-flow-forecast.js",
       "data-store.js",
       "date-utils.js",
+      "debt-recommendation-engine.js",
       "diagnostic-logger.js",
       "assets/**",
       "build/icon.ico",
