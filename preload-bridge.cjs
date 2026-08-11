@@ -54,8 +54,10 @@ function loadFinancialPresentationModules() {
   }
 }
 
-if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', loadFinancialPresentationModules, { once: true });
-} else {
-  loadFinancialPresentationModules();
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', loadFinancialPresentationModules, { once: true });
+  } else {
+    loadFinancialPresentationModules();
+  }
 }
