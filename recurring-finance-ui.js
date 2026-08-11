@@ -3,6 +3,7 @@ import {
 } from './recurring-finance.js';
 import { renderPaydayAwareness } from './payday-awareness-ui.js';
 import { renderAutomationRulesPanel } from './automation-rules-ui.js';
+import { renderFinancialRemindersPanel } from './financial-reminders-ui.js';
 
 let latestState = null;
 let renderScheduled = false;
@@ -12,6 +13,7 @@ export function renderRecurringActivityPanel(state) {
   latestState = state;
   renderPaydayAwareness(state);
   renderAutomationRulesPanel(state);
+  renderFinancialRemindersPanel(state);
   if (renderScheduled) return;
   renderScheduled = true;
   queueMicrotask(() => { renderScheduled = false; renderPanel(); });
@@ -54,7 +56,7 @@ function decisionButton(label, patternId, decision, className) { const button = 
 async function handleDecision(event) {
   const button = event.target.closest('[data-recurring-decision]'); if (!button || !latestState || !window.financeAPI?.saveState) return;
   const status = document.getElementById('recurringActivityStatus'); button.disabled = true; if (status) status.textContent = button.dataset.recurringDecision === RECURRING_DECISION.CONFIRMED ? 'Confirming this pattern…' : 'Rejecting this pattern…';
-  try { const next = applyRecurringPatternDecision(latestState, button.dataset.recurringPatternId, button.dataset.recurringDecision, new Date()); latestState = await window.financeAPI.saveState(next); if (status) status.textContent = button.dataset.recurringDecision === RECURRING_DECISION.CONFIRMED ? 'Pattern confirmed. Its expected window can now be used by financial automation.' : 'Pattern rejected. Identical evidence will stay rejected unless the underlying history materially changes.'; renderPaydayAwareness(latestState); renderAutomationRulesPanel(latestState); renderPanel(); window.setTimeout(() => window.location.reload(), 150); }
+  try { const next = applyRecurringPatternDecision(latestState, button.dataset.recurringPatternId, button.dataset.recurringDecision, new Date()); latestState = await window.financeAPI.saveState(next); if (status) status.textContent = button.dataset.recurringDecision === RECURRING_DECISION.CONFIRMED ? 'Pattern confirmed. Its expected window can now be used by financial automation.' : 'Pattern rejected. Identical evidence will stay rejected unless the underlying history materially changes.'; renderPaydayAwareness(latestState); renderAutomationRulesPanel(latestState); renderFinancialRemindersPanel(latestState); renderPanel(); window.setTimeout(() => window.location.reload(), 150); }
   catch (error) { button.disabled = false; if (status) status.textContent = error?.message || 'The recurring-pattern decision could not be saved.'; }
 }
 function amountSummary(pattern) { const range = pattern.amountRange; if (!range) return `${pattern.occurrences} occurrence${pattern.occurrences === 1 ? '' : 's'}`; const amount = range.min === range.max ? formatMoney(range.min) : `${formatMoney(range.min)}–${formatMoney(range.max)}`; return `${pattern.occurrences} occurrence${pattern.occurrences === 1 ? '' : 's'} · typical ${formatMoney(range.typical)} · observed ${amount}`; }
