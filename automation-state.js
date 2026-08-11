@@ -6,7 +6,7 @@ const SAFE_CODE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,119}$/;
 const MAX_EXECUTIONS = 5000;
 const MAX_MANUAL_OVERRIDES = 1000;
 
-export const AUTOMATION_STATE_VERSION = 2;
+export const AUTOMATION_STATE_VERSION = 1;
 
 export function normaliseAutomationState(value) {
   const automation = isPlainObject(value) ? value : {};
