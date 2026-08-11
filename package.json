@@ -81,6 +81,8 @@
       "next-move-priority.js",
       "payment-bulk-review.js",
       "payment-bulk-review-ui.js",
+      "payday-allocation.js",
+      "payday-allocation-ui.js",
       "payday-awareness.js",
       "payday-awareness-ui.js",
       "pdf-service.js",

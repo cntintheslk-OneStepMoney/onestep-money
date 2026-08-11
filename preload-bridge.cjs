@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
 }));
 
 function loadFinancialPresentationModules() {
-  for (const source of ['financial-presentation-forecast.js', 'financial-presentation-debt.js']) {
+  for (const source of ['financial-presentation-forecast.js', 'financial-presentation-debt.js', 'payday-allocation-ui.js']) {
     if (document.querySelector(`script[data-financial-presentation="${source}"]`)) continue;
     const script = document.createElement('script');
     script.type = 'module';
