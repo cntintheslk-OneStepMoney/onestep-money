@@ -42,3 +42,20 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
     return () => ipcRenderer.removeListener('backup:restore-progress', listener);
   }
 }));
+
+function loadFinancialPresentationModules() {
+  for (const source of ['financial-presentation-forecast.js', 'financial-presentation-debt.js']) {
+    if (document.querySelector(`script[data-financial-presentation="${source}"]`)) continue;
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = source;
+    script.dataset.financialPresentation = source;
+    document.head.append(script);
+  }
+}
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', loadFinancialPresentationModules, { once: true });
+} else {
+  loadFinancialPresentationModules();
+}
