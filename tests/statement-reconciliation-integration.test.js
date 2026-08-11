@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { FinanceDataStore } from '../data-store.js';
 import { isTransactionFinanciallyActive } from '../finance-core.js';
 import { activeReviewItems } from '../review-lifecycle.js';
