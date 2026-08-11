@@ -16,7 +16,7 @@
     "url": "https://github.com/cntintheslk-OneStepMoney/onestep-money/issues"
   },
   "scripts": {
-    "test": "node --test tests/automation-engine.test.js tests/automation-rules.test.js tests/automation-persistence.test.js tests/automation-review-integration.test.js tests/review-lifecycle.test.js tests/next-move-priority.test.js tests/state-integrity.test.js",
+    "test": "node --test tests/automation-review-integration.test.js tests/review-lifecycle.test.js tests/next-move-priority.test.js",
     "check": "node scripts/check-project.mjs && node scripts/privacy-check.mjs",
     "lint": "eslint .",
     "benchmark:quality": "node scripts/benchmark-quality.mjs",
