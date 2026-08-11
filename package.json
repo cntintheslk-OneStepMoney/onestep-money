@@ -4,7 +4,7 @@
   "description": "A local-first, ADHD-friendly UK finance and debt companion built around one clear move at a time.",
   "private": true,
   "type": "module",
-  "main": "main-process.js",
+  "main": "main-entry.js",
   "author": "OneStep Money contributors",
   "license": "MIT",
   "repository": {
@@ -46,6 +46,9 @@
     "asar": true,
     "files": [
       "automation-engine.js",
+      "automation-rule-model.js",
+      "automation-rules.js",
+      "automation-rules-ui.js",
       "automation-state.js",
       "data-store.js",
       "date-utils.js",
@@ -58,6 +61,7 @@
       "financial-reporting.js",
       "index.html",
       "local-llm-service.js",
+      "main-entry.js",
       "main-process.js",
       "next-move-priority.js",
       "payday-awareness.js",
