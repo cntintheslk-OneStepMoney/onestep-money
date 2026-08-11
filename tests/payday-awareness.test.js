@@ -80,9 +80,10 @@ test('monthly payday rules handle fixed weekends, last working day, last selecte
 test('multiple independent streams include four-weekly income and expose one shared consumer schedule', () => {
   let state = withSchedule(baseState(), { id: 'main-monthly', name: 'Fictional Main Employer', matchText: 'Main Employer', rule: { type: PAYDAY_RULE.FIXED_DAY, day: 10, weekendAdjustment: WEEKEND_ADJUSTMENT.NONE } }, new Date('2026-08-01T12:00:00Z'));
   state.transactions = [
-    incoming('side-1', '2026-05-20', 350, 'Fictional Side Work'),
-    incoming('side-2', '2026-06-17', 360, 'Fictional Side Work'),
-    incoming('side-3', '2026-07-15', 355, 'Fictional Side Work')
+    incoming('side-1', '2026-01-02', 340, 'Fictional Side Work'),
+    incoming('side-2', '2026-01-30', 350, 'Fictional Side Work'),
+    incoming('side-3', '2026-02-27', 360, 'Fictional Side Work'),
+    incoming('side-4', '2026-03-27', 355, 'Fictional Side Work')
   ];
   state = confirmDetectedPattern(state, 'incoming', new Date('2026-08-01T12:00:00Z'));
   const context = buildPaydayContext(state, { now: new Date('2026-08-01T12:00:00Z') });
@@ -91,7 +92,7 @@ test('multiple independent streams include four-weekly income and expose one sha
   assert.equal(context.streams.some((item) => item.cadence === 'four-weekly'), true);
   assert.equal(context.nextPayday.date, '2026-08-10');
   assert.equal(context.consumerSchedule.length, 2);
-  assert.equal(context.consumerSchedule.some((item) => item.cadence === 'four-weekly' && item.nextExpected.date === '2026-08-12'), true);
+  assert.equal(context.consumerSchedule.some((item) => item.cadence === 'four-weekly' && item.nextExpected.date === '2026-08-14'), true);
 });
 
 test('matching payslip and bank credit are one received income event, never two incomes', () => {
