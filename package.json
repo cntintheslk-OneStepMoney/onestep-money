@@ -50,6 +50,7 @@
       "automation-rules.js",
       "automation-rules-ui.js",
       "automation-state.js",
+      "cash-flow-forecast.js",
       "data-store.js",
       "date-utils.js",
       "diagnostic-logger.js",
