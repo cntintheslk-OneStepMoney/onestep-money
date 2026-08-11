@@ -2,6 +2,21 @@
 
 This file records the user-facing and release-relevant changes prepared for OneStep Money. Publication and shipped status remain authoritative in the GitHub release/project records.
 
+## 2.2.1 — Interaction Hotfix
+
+### Bug
+- Restored core navigation when normal renderer event binding is interrupted (#145).
+
+### Maintenance
+- Added runtime-style navigation regression coverage and packaged the independent interaction fallback.
+- Updated application package metadata for v2.2.1.
+
+### Data/Migration
+- No stored-data format or migration changes.
+
+### Known Limitations
+- This hotfix changes interaction reliability only; it adds no new feature scope.
+
 ## 2.2.0 — Financial Automation
 
 ### Feature
