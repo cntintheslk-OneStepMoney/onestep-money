@@ -1,0 +1,317 @@
+name: Rewrite historical commit metadata
+
+on:
+  push:
+    branches: [chore/rewrite-commit-history]
+
+permissions:
+  contents: write
+
+env:
+  BACKUP_PREFIX: history-backup/issue-123-${{ github.run_id }}
+  STAGING_PREFIX: history-rewrite/issue-123-${{ github.run_id }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      staging_main: ${{ steps.refs.outputs.staging_main }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Snapshot published branches and build safety refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          mapfile -t branches < <(
+            git for-each-ref refs/remotes/origin --format='%(refname:strip=3)' |
+              grep -v '^HEAD$' |
+              grep -v '^history-backup/' |
+              grep -v '^history-rewrite/' |
+              sort
+          )
+          test ${#branches[@]} -gt 0
+          printf '%s\n' "${branches[@]}" > /tmp/original-branches.txt
+          for branch in "${branches[@]}"; do
+            git push origin "refs/remotes/origin/$branch:refs/heads/$BACKUP_PREFIX/$branch"
+          done
+
+      - name: Rewrite commit messages only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/normalize_message.py <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          old = sys.stdin.read().strip('\n')
+          lines = [line.strip() for line in old.splitlines() if line.strip()]
+          first = lines[0] if lines else 'Historical change'
+
+          allowed_types = ('Feature', 'Bug', 'UI/UX', 'Security', 'QOL', 'Maintenance')
+          canonical = re.compile(r'^\[(v\d+\.\d+\.\d+|Unscheduled|Historical|Superseded)\]\[(Feature|Bug|UI/UX|Security|QOL|Maintenance)\]\s+(.+)$')
+
+          first_match = canonical.match(first)
+          required_labels = ('Purpose:', 'Changes:', 'Verification:', 'Issue:')
+          if first_match and all(label in old for label in required_labels):
+              sys.stdout.write(old.rstrip() + '\n')
+              raise SystemExit(0)
+
+          canonical_line = None
+          canonical_match = None
+          for line in lines:
+              match = canonical.match(line)
+              if match:
+                  canonical_line = line
+                  canonical_match = match
+                  break
+
+          issue_match = re.search(r'Merge pull request #(\d+)', old, re.I) or re.search(r'(?<!\w)#(\d+)\b', old)
+          issue = f'#{issue_match.group(1)}' if issue_match else 'N/A'
+
+          if canonical_match:
+              release, commit_type, title = canonical_match.groups()
+          else:
+              version_match = re.search(r'(?i)\bv(\d+\.\d+\.\d+)\b', old)
+              release = f'v{version_match.group(1)}' if version_match else 'Historical'
+
+              raw_title = first
+              if re.match(r'^Merge pull request #\d+\b', first, re.I):
+                  candidates = [
+                      line for line in lines[1:]
+                      if not line.startswith(required_labels)
+                  ]
+                  if candidates:
+                      raw_title = candidates[0]
+
+              raw_title = re.sub(r'^\[(?:v\d+\.\d+\.\d+|Unscheduled|Historical|Superseded)\]\[(?:Feature|Bug|UI/UX|Security|QOL|Maintenance)\]\s*', '', raw_title, flags=re.I)
+              raw_title = re.sub(r'^(feat|fix|chore|test|docs|ci|build|refactor)(?:\([^)]*\))?!?:\s*', '', raw_title, flags=re.I)
+              raw_title = re.sub(r'^v\d+\.\d+\.\d+\s*[:—-]\s*', '', raw_title, flags=re.I)
+              raw_title = re.sub(r'^Merge pull request #(\d+) from \S+$', r'Merge PR #\1', raw_title, flags=re.I)
+              title = ' '.join(raw_title.split()).strip(' -:') or 'Historical change'
+              title = title[0].upper() + title[1:] if title else 'Historical change'
+
+              prefix_match = re.match(r'^(feat|fix|chore|test|docs|ci|build|refactor)(?:\([^)]*\))?!?:', first, re.I)
+              conventional = prefix_match.group(1).lower() if prefix_match else None
+              haystack = f'{first} {title} {old}'.lower()
+
+              if conventional == 'fix':
+                  commit_type = 'Bug'
+              elif conventional == 'feat':
+                  commit_type = 'Feature'
+              elif conventional in {'chore', 'test', 'docs', 'ci', 'build', 'refactor'}:
+                  commit_type = 'Maintenance'
+              elif any(term in haystack for term in ('security', 'encryption', 'encrypt ', 'credential', 'secret handling', 'authentication', 'privacy hardening')):
+                  commit_type = 'Security'
+              elif any(term in haystack for term in ('qol', 'quality of life', 'convenience', 'usability')):
+                  commit_type = 'QOL'
+              elif any(term in haystack for term in ('ui ', ' ui', 'dashboard', 'theme', 'night mode', 'layout', 'visual', 'accessibility', 'icon', 'typography', 'chart')):
+                  commit_type = 'UI/UX'
+              elif any(term in haystack for term in ('fix ', 'fixed ', 'bug', 'crash', 'broken', 'failure', 'fails ', 'recovery', 'restore ', 'duplicate', 'prevent ')):
+                  commit_type = 'Bug'
+              elif any(term in haystack for term in ('add ', 'added ', 'implement', 'support ', 'feature', 'automation', 'forecast', 'reminder', 'categorisation', 'categorization', 'import ')):
+                  commit_type = 'Feature'
+              else:
+                  commit_type = 'Maintenance'
+
+          subject = f'[{release}][{commit_type}] {title}'
+          body = [
+              subject,
+              '',
+              f'Purpose: {title}',
+              f'Changes: {title}',
+              'Verification: Historical commit; no new verification is claimed by this metadata-only rewrite.',
+              f'Issue: {issue}',
+          ]
+          sys.stdout.write('\n'.join(body) + '\n')
+          PY
+
+          git checkout --detach
+          while IFS= read -r branch; do
+            git update-ref "refs/heads/rewrite/$branch" "refs/remotes/origin/$branch"
+          done < /tmp/original-branches.txt
+
+          mapfile -t rewrite_refs < <(git for-each-ref refs/heads/rewrite --format='%(refname)' | sort)
+          test ${#rewrite_refs[@]} -gt 0
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force \
+            --msg-filter 'python /tmp/normalize_message.py' \
+            -- "${rewrite_refs[@]}"
+
+      - name: Verify rewritten metadata and file-history preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from collections import Counter
+          import re
+          import subprocess
+          import sys
+
+          subject_re = re.compile(r'^\[(?:v\d+\.\d+\.\d+|Unscheduled|Historical|Superseded)\]\[(?:Feature|Bug|UI/UX|Security|QOL|Maintenance)\] .+')
+          labels = ('Purpose:', 'Changes:', 'Verification:', 'Issue:')
+
+          def run(*args):
+              return subprocess.check_output(args, text=True).strip()
+
+          branches = [line.strip() for line in open('/tmp/original-branches.txt', encoding='utf-8') if line.strip()]
+          for branch in branches:
+              old_ref = f'refs/remotes/origin/{branch}'
+              new_ref = f'refs/heads/rewrite/{branch}'
+              if run('git', 'rev-parse', f'{old_ref}^{{tree}}') != run('git', 'rev-parse', f'{new_ref}^{{tree}}'):
+                  raise SystemExit(f'tip tree changed for {branch}')
+
+              fmt = '%T%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%P'
+              old_rows = run('git', 'log', '--all-match', '--format=' + fmt, old_ref).splitlines()
+              new_rows = run('git', 'log', '--all-match', '--format=' + fmt, new_ref).splitlines()
+              old_meta = Counter('\x1f'.join(row.split('\x1f')[:-1] + [str(len(row.split('\x1f')[-1].split()))]) for row in old_rows)
+              new_meta = Counter('\x1f'.join(row.split('\x1f')[:-1] + [str(len(row.split('\x1f')[-1].split()))]) for row in new_rows)
+              if old_meta != new_meta:
+                  raise SystemExit(f'author/committer/tree/topology metadata changed for {branch}')
+
+          refs = subprocess.check_output(['git', 'for-each-ref', 'refs/heads/rewrite', '--format=%(refname)'], text=True).splitlines()
+          commits = subprocess.check_output(['git', 'rev-list', *refs], text=True).splitlines()
+          failures = []
+          for sha in commits:
+              message = subprocess.check_output(['git', 'show', '-s', '--format=%B', sha], text=True)
+              subject = message.splitlines()[0] if message.splitlines() else ''
+              if not subject_re.match(subject):
+                  failures.append(f'{sha}: invalid subject {subject!r}')
+                  continue
+              for label in labels:
+                  if label not in message:
+                      failures.append(f'{sha}: missing {label}')
+          if failures:
+              print('\n'.join(failures[:50]))
+              raise SystemExit(f'{len(failures)} rewritten commit-message violations')
+          print(f'Validated {len(commits)} unique rewritten commits across {len(branches)} branches.')
+          PY
+
+      - name: Publish staged rewritten refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r branch; do
+            git push --force origin "refs/heads/rewrite/$branch:refs/heads/$STAGING_PREFIX/$branch"
+          done < /tmp/original-branches.txt
+
+      - id: refs
+        shell: bash
+        run: echo "staging_main=$STAGING_PREFIX/main" >> "$GITHUB_OUTPUT"
+
+  verify-linux:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.staging_main }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
+
+  verify-windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.staging_main }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - run: npm run lint
+      - name: Built Pages artifact runtime smoke test
+        timeout-minutes: 2
+        run: npm run smoke:pages
+      - name: Electron desktop startup smoke test
+        timeout-minutes: 2
+        run: npm run capture
+        env:
+          FINANCE_CAPTURE_PATH: ${{ runner.temp }}/onestep-money-startup.png
+          FINANCE_USER_DATA_PATH: ${{ runner.temp }}/onestep-money-user-data
+      - name: Windows packaging smoke test
+        timeout-minutes: 15
+        run: npm run dist:win -- --publish never
+
+  apply:
+    needs: [prepare, verify-linux, verify-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Atomically replace published branch refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          mapfile -t backup_refs < <(git for-each-ref "refs/remotes/origin/$BACKUP_PREFIX" --format='%(refname)' | sort)
+          test ${#backup_refs[@]} -gt 0
+
+          declare -A backed_up
+          leases=()
+          refspecs=()
+
+          for backup_ref in "${backup_refs[@]}"; do
+            branch=${backup_ref#refs/remotes/origin/$BACKUP_PREFIX/}
+            backed_up["$branch"]=1
+            original_ref="refs/remotes/origin/$branch"
+            staging_ref="refs/remotes/origin/$STAGING_PREFIX/$branch"
+            test -n "$(git for-each-ref "$original_ref" --format='%(refname)')"
+            test -n "$(git for-each-ref "$staging_ref" --format='%(refname)')"
+
+            expected=$(git rev-parse "$backup_ref")
+            current=$(git rev-parse "$original_ref")
+            staged=$(git rev-parse "$staging_ref")
+            if [[ "$current" != "$expected" ]]; then
+              echo "Branch moved during rewrite: $branch" >&2
+              exit 1
+            fi
+            if [[ "$(git rev-parse "$original_ref^{tree}")" != "$(git rev-parse "$staging_ref^{tree}")" ]]; then
+              echo "Tree mismatch before apply: $branch" >&2
+              exit 1
+            fi
+            leases+=("--force-with-lease=refs/heads/$branch:$expected")
+            refspecs+=("$staging_ref:refs/heads/$branch")
+          done
+
+          while IFS= read -r branch; do
+            [[ "$branch" == HEAD ]] && continue
+            [[ "$branch" == history-backup/* ]] && continue
+            [[ "$branch" == history-rewrite/* ]] && continue
+            if [[ -z "${backed_up[$branch]+x}" ]]; then
+              echo "New un-snapshotted branch appeared during rewrite: $branch" >&2
+              exit 1
+            fi
+          done < <(git for-each-ref refs/remotes/origin --format='%(refname:strip=3)' | sort)
+
+          git push --atomic "${leases[@]}" origin "${refspecs[@]}"
+
+      - name: Verify published refs match staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          while IFS= read -r staging_ref; do
+            branch=${staging_ref#refs/remotes/origin/$STAGING_PREFIX/}
+            original_ref="refs/remotes/origin/$branch"
+            if [[ "$(git rev-parse "$staging_ref")" != "$(git rev-parse "$original_ref")" ]]; then
+              echo "Published ref mismatch: $branch" >&2
+              exit 1
+            fi
+          done < <(git for-each-ref "refs/remotes/origin/$STAGING_PREFIX" --format='%(refname)' | sort)
