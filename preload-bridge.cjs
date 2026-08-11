@@ -43,6 +43,16 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   }
 }));
 
+function loadCoreInteractionModule() {
+  const source = 'core-interactions.js';
+  if (document.querySelector(`script[data-core-interactions="${source}"]`)) return;
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.src = source;
+  script.dataset.coreInteractions = source;
+  document.head.append(script);
+}
+
 function loadFinancialPresentationModules() {
   for (const source of ['financial-presentation-forecast.js', 'financial-presentation-debt.js', 'payday-allocation-ui.js']) {
     if (document.querySelector(`script[data-financial-presentation="${source}"]`)) continue;
@@ -84,6 +94,7 @@ function loadAutomationDashboardModule() {
 }
 
 function loadLocalPresentationModules() {
+  loadCoreInteractionModule();
   loadFinancialPresentationModules();
   loadAutomationHistoryModule();
   loadAutomationDashboardModule();
