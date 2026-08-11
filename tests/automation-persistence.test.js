@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  AUTOMATION_CERTAINTY, AUTOMATION_SAFETY_CLASS, AUTOMATION_TRIGGER, createAutomationTrigger,
-  evaluateAutomationRules, executeAutomationProposal, setAutomationEnabled
+  AUTOMATION_CERTAINTY, AUTOMATION_EXECUTION_STATUS, AUTOMATION_REASON, AUTOMATION_SAFETY_CLASS, AUTOMATION_TRIGGER,
+  createAutomationTrigger, evaluateAutomationRules, executeAutomationProposal, setAutomationEnabled
 } from '../automation-engine.js';
+import { synchroniseAutomationReviewSignals } from '../automation-review-integration.js';
 import { FinanceDataStore } from '../data-store.js';
 import { createUserFinancialReminder } from '../financial-reminders.js';
+import { activeReviewItems, synchroniseReviewItems } from '../review-lifecycle.js';
 
 const seedPath = new URL('../seed-data.json', import.meta.url);
 
@@ -20,13 +22,27 @@ test('legacy state migrates automation metadata safely and backup/restore preser
 
   let current = (await store.loadState()).state;
   assert.equal(current.schemaVersion, 10);
-  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {} });
+  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {}, reviewSignals: {} });
 
   current = createUserFinancialReminder(current, {
     title: 'Fictional annual renewal', dueDate: '2026-09-01', daysBefore: 7
   }, new Date('2026-08-10T19:00:00.000Z'));
   current.transactions.push(fictionalTransaction());
+  current = synchroniseAutomationReviewSignals(current, {
+    results: [{
+      status: AUTOMATION_EXECUTION_STATUS.REVIEW_REQUIRED,
+      reasonCode: AUTOMATION_REASON.REVIEW_REQUIRED,
+      sourceType: 'transaction',
+      sourceId: 'fictional-automation-record',
+      actionType: 'mark_local_record',
+      dueAt: '2026-09-01T09:00:00.000Z'
+    }]
+  }, new Date('2026-08-10T19:30:00.000Z')).state;
+  synchroniseReviewItems(current, new Date('2026-08-10T19:30:00.000Z'));
+  const automationReviewId = activeReviewItems(current).find((item) => item.type === 'automation_attention')?.id;
+  assert.ok(automationReviewId);
   current = await store.saveState(current);
+
   const trigger = createAutomationTrigger(AUTOMATION_TRIGGER.TRANSACTION_CHANGE, { sourceType: 'transaction', sourceId: 'fictional-automation-record' });
   const candidate = evaluateAutomationRules(current, trigger, [fictionalRule()])[0];
   const applied = await executeAutomationProposal(current, candidate, {
@@ -47,12 +63,16 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   assert.equal(current.automation.executions[executionId].status, 'applied');
   assert.equal(current.automation.reminders[0].title, 'Fictional annual renewal');
   assert.equal(current.automation.reminders[0].dueDate, '2026-09-01');
+  assert.equal(Object.keys(current.automation.reviewSignals).length, 1);
+  assert.equal(current.reviewItems.find((item) => item.id === automationReviewId)?.status, 'needs_attention');
 
   const backupPath = path.join(directory, 'fictional-automation.osmb');
   await restarted.createPortableBackup(backupPath, 'fictional-passphrase', current);
   let changed = setAutomationEnabled(current, true);
   changed.automation.executions = {};
   changed.automation.reminders = [];
+  changed.automation.reviewSignals = {};
+  changed.reviewItems = [];
   await restarted.saveState(changed);
 
   const restored = await restarted.restorePortableBackup(backupPath, 'fictional-passphrase');
@@ -61,6 +81,8 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   assert.equal(restored.state.automation.executions[executionId].status, 'applied');
   assert.equal(restored.state.automation.reminders[0].title, 'Fictional annual renewal');
   assert.equal(restored.state.automation.reminders[0].daysBefore, 7);
+  assert.equal(Object.keys(restored.state.automation.reviewSignals).length, 1);
+  assert.equal(restored.state.reviewItems.find((item) => item.id === automationReviewId)?.status, 'needs_attention');
 });
 
 function fictionalRule() {
