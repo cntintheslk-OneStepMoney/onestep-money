@@ -13,6 +13,8 @@ export const PAGE_FILES = Object.freeze([
   ['demo/demo-data.js', 'demo/demo-data.js'],
   ['demo/demo-state.js', 'demo/demo-state.js'],
   ['assets/onestep-money-icon.png', 'assets/onestep-money-icon.png'],
+  ['automation-rule-model.js', 'automation-rule-model.js'],
+  ['automation-rules-ui.js', 'automation-rules-ui.js'],
   ['date-utils.js', 'date-utils.js'],
   ['finance-core.js', 'finance-core.js'],
   ['financial-reporting.js', 'financial-reporting.js'],
