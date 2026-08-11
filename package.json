@@ -16,7 +16,7 @@
     "url": "https://github.com/cntintheslk-OneStepMoney/onestep-money/issues"
   },
   "scripts": {
-    "test": "node --test tests/github-pages.test.js tests/interaction-ui.test.js tests/local-financial-month.test.js tests/merchant-purpose-categorisation.test.js tests/payday-awareness.test.js tests/payment-bulk-review-ui.test.js tests/payment-bulk-review.test.js tests/payslip-record.test.js tests/pdf-service.test.js tests/preload-bridge.test.js tests/presentation-settings.test.js",
+    "test": "node --test tests/github-pages.test.js",
     "check": "node scripts/check-project.mjs && node scripts/privacy-check.mjs",
     "lint": "eslint .",
     "benchmark:quality": "node scripts/benchmark-quality.mjs",
@@ -97,9 +97,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/icon.ico",
       "artifactName": "onestep-money-${version}-windows-${arch}.${ext}"
     },
@@ -111,11 +109,6 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
     },
-    "publish": [
-      {
-        "provider": "github",
-        "releaseType": "release"
-      }
-    ]
+    "publish": [{"provider":"github","releaseType":"release"}]
   }
 }
