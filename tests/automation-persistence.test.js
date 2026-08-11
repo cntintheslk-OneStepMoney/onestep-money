@@ -22,7 +22,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
 
   let current = (await store.loadState()).state;
   assert.equal(current.schemaVersion, 10);
-  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {}, reviewSignals: {} });
+  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {}, reviewSignals: {}, history: {} });
 
   current = createUserFinancialReminder(current, {
     title: 'Fictional annual renewal', dueDate: '2026-09-01', daysBefore: 7
@@ -61,6 +61,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   current = (await restarted.loadState()).state;
   assert.equal(current.automation.enabled, false);
   assert.equal(current.automation.executions[executionId].status, 'applied');
+  assert.deepEqual(current.automation.history, {});
   assert.equal(current.automation.reminders[0].title, 'Fictional annual renewal');
   assert.equal(current.automation.reminders[0].dueDate, '2026-09-01');
   assert.equal(Object.keys(current.automation.reviewSignals).length, 1);
@@ -72,6 +73,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   changed.automation.executions = {};
   changed.automation.reminders = [];
   changed.automation.reviewSignals = {};
+  changed.automation.history = {};
   changed.reviewItems = [];
   await restarted.saveState(changed);
 
@@ -79,6 +81,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
   assert.equal(restored.status, 'restored');
   assert.equal(restored.state.automation.enabled, false);
   assert.equal(restored.state.automation.executions[executionId].status, 'applied');
+  assert.deepEqual(restored.state.automation.history, {});
   assert.equal(restored.state.automation.reminders[0].title, 'Fictional annual renewal');
   assert.equal(restored.state.automation.reminders[0].daysBefore, 7);
   assert.equal(Object.keys(restored.state.automation.reviewSignals).length, 1);

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
-import { previewStoredAutomationRules, runStoredAutomationRules } from './automation-rules.js';
+import { runStoredAutomationRulesWithHistory } from './automation-history-runner.js';
+import { previewStoredAutomationRules } from './automation-rules.js';
 import './main-process.js';
 
 const MAX_AUTOMATION_STATE_BYTES = 25_000_000;
@@ -17,7 +18,7 @@ ipcMain.handle('automation:preview', async (_event, state, options = {}) => {
 
 ipcMain.handle('automation:run', async (_event, state, options = {}) => {
   validateStatePayload(state);
-  return runStoredAutomationRules(state, {
+  return runStoredAutomationRulesWithHistory(state, {
     now: safeNow(options?.now),
     recoveryMode: 'normal'
   });
