@@ -170,9 +170,9 @@ test('compatible duplicate actions deduplicate and conflicting categories fail s
   assert.ok(result.results.some((row) => row.reasonCode === 'rule_conflict'));
 });
 
-test('preview includes a paused rule but never mutates state', () => {
+test('preview includes a paused rule but never mutates state', async () => {
   const state = upsertAutomationRule(baseState(), { ...merchantBudgetRule(), enabled: false }, new Date('2026-08-11T11:00:00.000Z'));
-  const preview = previewStoredAutomationRules(state, { ruleId: 'rule_tesco_fuel', now: new Date('2026-08-11T12:00:00.000Z') });
+  const preview = await previewStoredAutomationRules(state, { ruleId: 'rule_tesco_fuel', now: new Date('2026-08-11T12:00:00.000Z') });
   assert.equal(preview.matchCount, 1);
   assert.equal(state.transactions[0].budgetCategoryId, '');
 });
@@ -215,7 +215,7 @@ test('date-relative recurring rule creates one local reminder for a confirmed pa
 });
 
 test('rules implementation has no network, telemetry or analytics dependency', async () => {
-  for (const file of ['automation-rule-model.js', 'automation-rules.js']) {
+  for (const file of ['automation-rule-model.js', 'automation-rules.js', 'automation-rules-core.js']) {
     const source = await fs.readFile(new URL(`../${file}`, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /from ['"]node:(?:http|https|net|tls|dns)['"]/);
     assert.doesNotMatch(source, /\bfetch\s*\(/);
