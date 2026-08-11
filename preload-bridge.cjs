@@ -54,10 +54,25 @@ function loadFinancialPresentationModules() {
   }
 }
 
+function loadAutomationHistoryModule() {
+  const source = 'automation-history-ui.js';
+  if (document.querySelector(`script[data-automation-history="${source}"]`)) return;
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.src = source;
+  script.dataset.automationHistory = source;
+  document.head.append(script);
+}
+
+function loadLocalPresentationModules() {
+  loadFinancialPresentationModules();
+  loadAutomationHistoryModule();
+}
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   if (document.readyState === 'loading') {
-    window.addEventListener('DOMContentLoaded', loadFinancialPresentationModules, { once: true });
+    window.addEventListener('DOMContentLoaded', loadLocalPresentationModules, { once: true });
   } else {
-    loadFinancialPresentationModules();
+    loadLocalPresentationModules();
   }
 }

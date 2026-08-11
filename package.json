@@ -46,6 +46,9 @@
     "asar": true,
     "files": [
       "automation-engine.js",
+      "automation-history.js",
+      "automation-history-runner.js",
+      "automation-history-ui.js",
       "automation-review-integration.js",
       "automation-rule-model.js",
       "automation-rules.js",
