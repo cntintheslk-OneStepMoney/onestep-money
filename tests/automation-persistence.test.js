@@ -22,7 +22,7 @@ test('legacy state migrates automation metadata safely and backup/restore preser
 
   let current = (await store.loadState()).state;
   assert.equal(current.schemaVersion, 10);
-  assert.deepEqual(current.automation, { version: 2, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {}, reviewSignals: {}, history: {} });
+  assert.deepEqual(current.automation, { version: 1, enabled: true, rules: [], reminders: [], executions: {}, manualOverrides: {}, reviewSignals: {}, history: {} });
 
   current = createUserFinancialReminder(current, {
     title: 'Fictional annual renewal', dueDate: '2026-09-01', daysBefore: 7
