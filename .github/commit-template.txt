@@ -1,0 +1,11 @@
+[vX.Y.Z][Type] Concise title
+
+Purpose: Why this commit exists.
+Changes: What changed in this commit.
+Verification: Tests/checks run, or why verification is unavailable.
+Issue: #NN
+
+# OSM commit title: [Release][Type] Concise title
+# Release: vX.Y.Z, Unscheduled, Historical or Superseded
+# Type: Feature, Bug, UI/UX, Security, QOL or Maintenance
+# Do not use new free-form prefixes such as feat:, fix:, test: or chore:.
