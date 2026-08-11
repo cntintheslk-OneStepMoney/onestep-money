@@ -52,6 +52,8 @@
       "automation-state.js",
       "financial-reminders.js",
       "financial-reminders-ui.js",
+      "financial-presentation-forecast.js",
+      "financial-presentation-debt.js",
       "cash-flow-forecast.js",
       "data-store.js",
       "date-utils.js",
