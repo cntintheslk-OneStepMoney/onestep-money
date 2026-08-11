@@ -25,6 +25,11 @@ export const AUTOMATION_RULE_ACTION = Object.freeze({
   CREATE_REMINDER: 'create_reminder'
 });
 
+export const AUTOMATION_RULE_ACTIVATION = Object.freeze({
+  LEGACY_EXISTING: 'legacy_existing',
+  FUTURE_ONLY: 'future_only'
+});
+
 const TRIGGERS = new Set(Object.values(AUTOMATION_RULE_TRIGGER));
 const CONDITIONS = new Set(Object.values(AUTOMATION_RULE_CONDITION));
 const ACTIONS = new Set(Object.values(AUTOMATION_RULE_ACTION));
@@ -67,6 +72,10 @@ export function validateAutomationRule(input) {
   const explanation = safeText(rule.explanation, 240) || explainRule({ trigger, conditions, action });
   const createdAt = validIso(rule.createdAt) ? rule.createdAt : null;
   const updatedAt = validIso(rule.updatedAt) ? rule.updatedAt : createdAt;
+  const activatedAt = validIso(rule.activatedAt) ? rule.activatedAt : null;
+  const activationMode = rule.activationMode === AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY || activatedAt
+    ? AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY
+    : AUTOMATION_RULE_ACTIVATION.LEGACY_EXISTING;
   const enabled = rule.enabled !== false;
 
   return {
@@ -80,6 +89,8 @@ export function validateAutomationRule(input) {
       conditions,
       action,
       explanation,
+      activationMode,
+      activatedAt,
       createdAt,
       updatedAt
     }
@@ -125,8 +136,13 @@ export function setAutomationRuleEnabled(state, ruleId, enabled, now = new Date(
   next.automation = normaliseAutomationRuleState(next.automation);
   const rule = next.automation.rules.find((item) => item.id === safeId(ruleId));
   if (!rule) throw new Error('That automation rule is no longer available.');
+  const timestamp = validDate(now).toISOString();
   rule.enabled = Boolean(enabled);
-  rule.updatedAt = validDate(now).toISOString();
+  rule.updatedAt = timestamp;
+  if (rule.enabled) {
+    rule.activationMode = AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY;
+    rule.activatedAt = timestamp;
+  }
   return next;
 }
 
@@ -138,6 +154,8 @@ export function duplicateAutomationRule(state, ruleId, newId, now = new Date()) 
     id: safeId(newId),
     name: `${source.name} copy`.slice(0, MAX_TEXT),
     enabled: false,
+    activationMode: AUTOMATION_RULE_ACTIVATION.FUTURE_ONLY,
+    activatedAt: null,
     createdAt: null,
     updatedAt: null
   }, now);
