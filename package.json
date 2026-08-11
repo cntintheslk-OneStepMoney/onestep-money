@@ -45,6 +45,10 @@
     "productName": "OneStep Money",
     "asar": true,
     "files": [
+      "automation-dashboard.css",
+      "automation-dashboard.js",
+      "automation-dashboard-ui.js",
+      "automation-dashboard-render.js",
       "automation-engine.js",
       "automation-history.js",
       "automation-history-runner.js",

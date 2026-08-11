@@ -64,9 +64,29 @@ function loadAutomationHistoryModule() {
   document.head.append(script);
 }
 
+function loadAutomationDashboardModule() {
+  const stylesheet = 'automation-dashboard.css';
+  if (!document.querySelector(`link[data-automation-dashboard-style="${stylesheet}"]`)) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = stylesheet;
+    link.dataset.automationDashboardStyle = stylesheet;
+    document.head.append(link);
+  }
+
+  const source = 'automation-dashboard-ui.js';
+  if (document.querySelector(`script[data-automation-dashboard="${source}"]`)) return;
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.src = source;
+  script.dataset.automationDashboard = source;
+  document.head.append(script);
+}
+
 function loadLocalPresentationModules() {
   loadFinancialPresentationModules();
   loadAutomationHistoryModule();
+  loadAutomationDashboardModule();
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
