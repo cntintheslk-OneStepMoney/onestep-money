@@ -1,4 +1,5 @@
 import * as base from './review-lifecycle-base.js';
+import { synchroniseFinancialReminders } from './financial-reminders.js';
 import {
   ensurePaydayConfiguration, missingIncomePresentation, missingIncomeReviewSources, nextDependablePayday
 } from './payday-awareness.js';
@@ -8,6 +9,7 @@ export const REVIEW_DIAGNOSTIC_CODES = base.REVIEW_DIAGNOSTIC_CODES;
 export const knownPaydayDay = base.knownPaydayDay;
 
 export function synchroniseReviewItems(state, now = new Date()) {
+  synchroniseFinancialReminders(state, now);
   ensurePaydayConfiguration(state, now);
   const previousMissing = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
     .filter((item) => item?.type === 'missing_income')
