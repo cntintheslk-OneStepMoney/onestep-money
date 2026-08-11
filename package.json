@@ -46,6 +46,7 @@
     "asar": true,
     "files": [
       "automation-engine.js",
+      "automation-review-integration.js",
       "automation-rule-model.js",
       "automation-rules.js",
       "automation-rules-ui.js",
@@ -96,9 +97,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/icon.ico",
       "artifactName": "onestep-money-${version}-windows-${arch}.${ext}"
     },
@@ -110,11 +109,6 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
     },
-    "publish": [
-      {
-        "provider": "github",
-        "releaseType": "release"
-      }
-    ]
+    "publish": [{"provider":"github","releaseType":"release"}]
   }
 }

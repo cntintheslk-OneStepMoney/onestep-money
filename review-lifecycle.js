@@ -1,6 +1,10 @@
 import * as base from './review-lifecycle-base.js';
 import { synchroniseFinancialReminders } from './financial-reminders.js';
 import {
+  AUTOMATION_REVIEW_TYPE, automationReviewPresentation, automationReviewRoute,
+  automationReviewSourceActive, automationReviewSources
+} from './automation-review-integration.js';
+import {
   ensurePaydayConfiguration, missingIncomePresentation, missingIncomeReviewSources, nextDependablePayday
 } from './payday-awareness.js';
 
@@ -8,15 +12,21 @@ export const REVIEW_STATUS = base.REVIEW_STATUS;
 export const REVIEW_DIAGNOSTIC_CODES = base.REVIEW_DIAGNOSTIC_CODES;
 export const knownPaydayDay = base.knownPaydayDay;
 
+const SUPPLEMENTAL_REVIEW_TYPES = new Set(['missing_income', ...Object.values(AUTOMATION_REVIEW_TYPE)]);
+
 export function synchroniseReviewItems(state, now = new Date()) {
   synchroniseFinancialReminders(state, now);
   ensurePaydayConfiguration(state, now);
-  const previousMissing = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
-    .filter((item) => item?.type === 'missing_income')
+  const previousSupplemental = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
+    .filter((item) => supplementalReviewType(item?.type))
     .map((item) => structuredClone(item));
-  state.reviewItems = (Array.isArray(state.reviewItems) ? state.reviewItems : []).filter((item) => item?.type !== 'missing_income');
+  state.reviewItems = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
+    .filter((item) => !supplementalReviewType(item?.type));
   base.synchroniseReviewItems(state, now);
-  mergeMissingItems(state, previousMissing, now);
+  mergeSupplementalItems(state, previousSupplemental, [
+    ...missingIncomeReviewSources(state, now),
+    ...automationReviewSources(state, now)
+  ], now);
   return state;
 }
 
@@ -47,13 +57,17 @@ export function reviewInboxSummary(state, now = new Date()) {
 }
 
 export function groupReviewItems(items, state, now = new Date()) {
-  return base.groupReviewItems(items, state).map((group) => group.type === 'missing_income'
-    ? { ...group, presentation: missingPresentation(state, group.items[0], now) }
-    : group);
+  return base.groupReviewItems(items, state).map((group) => {
+    if (group.type === 'missing_income') return { ...group, presentation: missingPresentation(state, group.items[0], now) };
+    if (automationReviewType(group.type)) return { ...group, presentation: automationReviewPresentation(state, group.items[0]) };
+    return group;
+  });
 }
 
 export function reviewItemPresentation(item, state, now = new Date()) {
-  return item?.type === 'missing_income' ? missingPresentation(state, item, now) : base.reviewItemPresentation(item, state);
+  if (item?.type === 'missing_income') return missingPresentation(state, item, now);
+  if (automationReviewType(item?.type)) return automationReviewPresentation(state, item);
+  return base.reviewItemPresentation(item, state);
 }
 
 // Keep the renderer-facing merchant/payee precedence explicit at this integration boundary.
@@ -96,8 +110,8 @@ export function snoozeReviewGroup(state, itemIds, choice, now = new Date()) {
 export function resolveReviewItem(state, itemId, decision, now = new Date()) {
   synchroniseReviewItems(state, now);
   const item = requireOpenItem(state, itemId);
-  if (item.type === 'missing_income') {
-    if (missingIncomeReviewSources(state, now).some((source) => source.sourceId === item.sourceId)) {
+  if (supplementalReviewType(item.type)) {
+    if (supplementalSourceActive(state, item, now)) {
       const error = new Error('Complete the underlying financial work before resolving this review item.');
       error.code = REVIEW_DIAGNOSTIC_CODES.RESOLUTION_FAILED;
       throw error;
@@ -109,11 +123,11 @@ export function resolveReviewItem(state, itemId, decision, now = new Date()) {
     item.resolution = { decision, resolvedAt: timestamp };
     return state;
   }
-  const preservedMissing = extractMissing(state);
+  const preservedSupplemental = extractSupplemental(state);
   try {
     base.resolveReviewItem(state, itemId, decision, now);
   } finally {
-    restoreMissing(state, preservedMissing);
+    restoreSupplemental(state, preservedSupplemental);
   }
   return synchroniseReviewItems(state, now);
 }
@@ -132,20 +146,20 @@ export function selectCheckInReviewItems(state, now = new Date(), limit = 4) {
 }
 
 export function reviewRoute(item, state = {}) {
-  return item?.type === 'missing_income'
-    ? { view: 'settings', type: 'income_schedule', id: item.sourceId }
-    : base.reviewRoute(item, state);
+  if (item?.type === 'missing_income') return { view: 'settings', type: 'income_schedule', id: item.sourceId };
+  if (automationReviewType(item?.type)) return automationReviewRoute(state, item);
+  return base.reviewRoute(item, state);
 }
 
-function mergeMissingItems(state, previousMissing, now) {
+function mergeSupplementalItems(state, previousSupplemental, sources, now) {
   const timestamp = validDate(now).toISOString();
-  const previous = new Map(previousMissing.map((item) => [item.id, item]));
+  const previous = new Map(previousSupplemental.map((item) => [item.id, item]));
   const activeIds = new Set();
   const merged = [];
-  for (const source of missingIncomeReviewSources(state, now)) {
+  for (const source of sources) {
     const id = reviewItemId(source.type, source.sourceType, source.sourceId);
     activeIds.add(id);
-    const item = previous.get(id) || createMissingItem(source, id, timestamp);
+    const item = previous.get(id) || createSupplementalItem(source, id, timestamp);
     const conditionChanged = item.conditionKey !== (source.conditionKey || '');
     item.type = source.type;
     item.priority = source.priority;
@@ -165,7 +179,7 @@ function mergeMissingItems(state, previousMissing, now) {
     if (conditionChanged) item.updatedAt = timestamp;
     merged.push(item);
   }
-  for (const item of previousMissing) {
+  for (const item of previousSupplemental) {
     if (activeIds.has(item.id)) continue;
     if (item.status !== REVIEW_STATUS.RESOLVED) {
       item.status = REVIEW_STATUS.RESOLVED;
@@ -175,30 +189,42 @@ function mergeMissingItems(state, previousMissing, now) {
     }
     merged.push(item);
   }
-  const nonMissing = (state.reviewItems || []).filter((item) => item?.type !== 'missing_income');
+  const nonSupplemental = (state.reviewItems || []).filter((item) => !supplementalReviewType(item?.type));
   const resolved = merged.filter((item) => item.status === REVIEW_STATUS.RESOLVED).slice(-5000);
   const active = merged.filter((item) => item.status !== REVIEW_STATUS.RESOLVED);
-  state.reviewItems = [...nonMissing, ...resolved, ...active]
+  state.reviewItems = [...nonSupplemental, ...resolved, ...active]
     .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || String(a.id).localeCompare(String(b.id)));
 }
 
-function extractMissing(state) {
-  const missing = (state.reviewItems || []).filter((item) => item?.type === 'missing_income').map((item) => structuredClone(item));
-  state.reviewItems = (state.reviewItems || []).filter((item) => item?.type !== 'missing_income');
-  return missing;
+function extractSupplemental(state) {
+  const supplemental = (state.reviewItems || [])
+    .filter((item) => supplementalReviewType(item?.type))
+    .map((item) => structuredClone(item));
+  state.reviewItems = (state.reviewItems || []).filter((item) => !supplementalReviewType(item?.type));
+  return supplemental;
 }
 
-function restoreMissing(state, missing) {
-  state.reviewItems = [...(state.reviewItems || []).filter((item) => item?.type !== 'missing_income'), ...missing];
+function restoreSupplemental(state, supplemental) {
+  state.reviewItems = [
+    ...(state.reviewItems || []).filter((item) => !supplementalReviewType(item?.type)),
+    ...supplemental
+  ];
 }
 
-function createMissingItem(source, id, timestamp) {
+function createSupplementalItem(source, id, timestamp) {
   return {
     id, type: source.type, status: REVIEW_STATUS.NEEDS_ATTENTION, priority: source.priority,
     createdAt: timestamp, updatedAt: timestamp, snoozedUntil: null,
     sourceType: source.sourceType, sourceId: String(source.sourceId), groupKey: '', conditionKey: source.conditionKey || '',
     resolution: null, snoozeCount: 0, lastSnoozedAt: null
   };
+}
+
+function supplementalSourceActive(state, item, now) {
+  if (item?.type === 'missing_income') {
+    return missingIncomeReviewSources(state, now).some((source) => source.sourceId === item.sourceId);
+  }
+  return automationReviewSourceActive(state, item, now);
 }
 
 function missingPresentation(state, item, now) {
@@ -258,6 +284,8 @@ function requireOpenItem(state, itemId) {
   return item;
 }
 
+function supplementalReviewType(value) { return SUPPLEMENTAL_REVIEW_TYPES.has(value); }
+function automationReviewType(value) { return Object.values(AUTOMATION_REVIEW_TYPE).includes(value); }
 function reviewItemId(type, sourceType, sourceId) { return `review:${safeToken(type, 60)}:${safeToken(sourceType, 40)}:${hashId(String(sourceId))}`; }
 function hashId(value) { let hash = 2166136261; for (const character of value) { hash ^= character.charCodeAt(0); hash = Math.imul(hash, 16777619); } return `${(hash >>> 0).toString(36)}-${value.length}`; }
 function safeToken(value, length) { return String(value || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, length); }

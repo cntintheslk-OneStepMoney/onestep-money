@@ -212,7 +212,7 @@ async function runCycle() {
   try {
     const result = await window.financeAPI.runAutomationRules(state, { now: new Date().toISOString() });
     runSummary = { applied: (result.results || []).filter((row) => row.status === 'applied').length, conflicts: result.conflicts?.length || 0 };
-    if (result.changed) {
+    if (result.changed || result.reviewChanged) {
       const saved = await window.financeAPI.saveState(result.state);
       if (saved?.status === 'blocked' || saved?.status === 'conflict') throw new Error(saved.message || 'Automation could not save safely.');
       state = saved; window.location.reload(); return;

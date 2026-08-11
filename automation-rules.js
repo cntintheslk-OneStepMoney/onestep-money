@@ -6,6 +6,7 @@ import {
   AUTOMATION_RULE_ACTION, AUTOMATION_RULE_CONDITION, AUTOMATION_RULE_TRIGGER,
   normaliseAutomationRuleCollection, normaliseAutomationRuleState, validateAutomationRule
 } from './automation-rule-model.js';
+import { synchroniseAutomationReviewSignals } from './automation-review-integration.js';
 import { deriveRecurringPatterns, RECURRING_CONFIDENCE } from './recurring-finance.js';
 import { resolveTransactionBudgetAssignment } from './transaction-categorisation.js';
 
@@ -28,8 +29,12 @@ export function previewStoredAutomationRules(state, options = {}) {
 
 export async function runStoredAutomationRules(state, options = {}) {
   let current = withNormalisedRules(state);
-  if (current.automation.enabled === false || !current.automation.rules.some((rule) => rule.enabled)) {
-    return { state: current, changed: false, results: [], conflicts: [] };
+  if (current.automation.enabled === false) {
+    return { state: current, changed: false, reviewChanged: false, results: [], conflicts: [] };
+  }
+  if (!current.automation.rules.some((rule) => rule.enabled)) {
+    const reviewSync = synchroniseAutomationReviewSignals(current, { conflicts: [], results: [] }, options.now);
+    return { state: reviewSync.state, changed: false, reviewChanged: reviewSync.changed, results: [], conflicts: [] };
   }
   const contexts = evaluationContexts(current, options.now);
   const proposals = evaluateContexts(current, current.automation.rules, contexts, false, options.now);
@@ -40,14 +45,16 @@ export async function runStoredAutomationRules(state, options = {}) {
       reasonCode: 'compatible_duplicate_rule_action',
       ruleId: entry.ruleId,
       sourceType: entry.source.type,
-      sourceId: entry.source.id
+      sourceId: entry.source.id,
+      actionType: entry.action.type
     })),
     ...resolution.conflicts.map((entry) => ({
       status: AUTOMATION_EXECUTION_STATUS.REVIEW_REQUIRED,
       reasonCode: 'rule_conflict',
       ruleId: entry.ruleIds.join(','),
       sourceType: entry.source.type,
-      sourceId: entry.source.id
+      sourceId: entry.source.id,
+      actionType: entry.actionType
     }))
   ];
 
@@ -64,10 +71,13 @@ export async function runStoredAutomationRules(state, options = {}) {
       ...executed.result,
       ruleId: proposal.ruleId,
       sourceType: proposal.source.type,
-      sourceId: proposal.source.id
+      sourceId: proposal.source.id,
+      actionType: proposal.action.type
     });
   }
-  return { state: current, changed, results, conflicts: resolution.conflicts };
+  const reviewSync = synchroniseAutomationReviewSignals(current, { conflicts: resolution.conflicts, results }, options.now);
+  current = reviewSync.state;
+  return { state: current, changed, reviewChanged: reviewSync.changed, results, conflicts: resolution.conflicts };
 }
 
 export function ruleActionHandlers() {
