@@ -9,6 +9,9 @@ import {
   PAYDAY_RULE, PAYDAY_TIMING, scheduleOccurrenceForMonth, upsertIncomeSchedule, WEEKEND_ADJUSTMENT
 } from '../payday-awareness.js';
 import {
+  applyRecurringPatternDecision, deriveRecurringPatterns, RECURRING_DECISION
+} from '../recurring-finance.js';
+import {
   activeReviewItems, reviewItemPresentation, snoozeReviewItem, synchroniseReviewItems
 } from '../review-lifecycle.js';
 
@@ -56,6 +59,12 @@ function outgoingRecurring(id, date, amount, description = 'Fictional Utility') 
   };
 }
 
+function confirmDetectedPattern(state, direction, now = NOW) {
+  const pattern = deriveRecurringPatterns(state).find((item) => item.direction === direction);
+  assert.ok(pattern, `Expected a detected ${direction} recurring pattern`);
+  return applyRecurringPatternDecision(state, pattern.id, RECURRING_DECISION.CONFIRMED, now);
+}
+
 test('monthly payday rules handle fixed weekends, last working day, last selected weekday and short months', () => {
   const fixed = withSchedule(baseState(), { rule: { type: PAYDAY_RULE.FIXED_DAY, day: 30, weekendAdjustment: WEEKEND_ADJUSTMENT.PREVIOUS } }).profile.incomeSchedules[0];
   const working = withSchedule(baseState(), { rule: { type: PAYDAY_RULE.LAST_WORKING_DAY } }).profile.incomeSchedules[0];
@@ -75,6 +84,7 @@ test('multiple independent streams include four-weekly income and expose one sha
     incoming('side-2', '2026-06-17', 360, 'Fictional Side Work'),
     incoming('side-3', '2026-07-15', 355, 'Fictional Side Work')
   ];
+  state = confirmDetectedPattern(state, 'incoming', new Date('2026-08-01T12:00:00Z'));
   const context = buildPaydayContext(state, { now: new Date('2026-08-01T12:00:00Z') });
 
   assert.equal(context.streams.length, 2);
@@ -107,7 +117,7 @@ test('future expected income is never added to Safe Until Payday', () => {
 });
 
 test('dated bills, required debt payments and protected buffer reduce Safe Until Payday', () => {
-  let state = withSchedule(baseState({
+  const state = withSchedule(baseState({
     scheduledPayments: [{ id: 'bill', name: 'Fictional Essential Bill', amount: 100, dueDate: '2026-08-20', status: 'due', includedInBudget: false }],
     debts: [{ id: 'loan', name: 'Fictional Loan', type: 'Personal loan', currentBalance: 500, balanceEffectiveDate: '2026-08-10', apr: 0.1, contractualPayment: 50, paymentDueDate: '2026-08-22', status: 'current', arrangementStatus: 'none', arrangementPayment: null, statusConflict: false, includeInPlan: true }]
   }), {});
@@ -127,6 +137,7 @@ test('confirmed recurring commitments before payday are protected without being 
     outgoingRecurring('utility-2', '2026-06-15', 82),
     outgoingRecurring('utility-3', '2026-07-15', 81)
   ];
+  state = confirmDetectedPattern(state, 'outgoing');
   const context = buildPaydayContext(state, { now: NOW });
 
   assert.equal(context.safeUntilPayday.status, 'available');
