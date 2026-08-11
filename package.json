@@ -107,9 +107,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/icon.ico",
       "artifactName": "onestep-money-${version}-windows-${arch}.${ext}"
     },
@@ -121,11 +119,6 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
     },
-    "publish": [
-      {
-        "provider": "github",
-        "releaseType": "release"
-      }
-    ]
+    "publish": [{"provider":"github","releaseType":"release"}]
   }
 }
