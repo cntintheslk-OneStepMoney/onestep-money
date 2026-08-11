@@ -17,11 +17,15 @@ export const PAGE_FILES = Object.freeze([
   ['finance-core.js', 'finance-core.js'],
   ['financial-reporting.js', 'financial-reporting.js'],
   ['next-move-priority.js', 'next-move-priority.js'],
+  ['payday-awareness.js', 'payday-awareness.js'],
+  ['payday-awareness-ui.js', 'payday-awareness-ui.js'],
   ['presentation-settings.js', 'presentation-settings.js'],
   ['recurring-finance.js', 'recurring-finance.js'],
   ['recurring-finance-ui.js', 'recurring-finance-ui.js'],
+  ['review-lifecycle-base.js', 'review-lifecycle-base.js'],
   ['review-lifecycle.js', 'review-lifecycle.js'],
-  ['transaction-categorisation.js', 'transaction-categorisation.js']
+  ['transaction-categorisation.js', 'transaction-categorisation.js'],
+  ['unified-financial-profile.js', 'unified-financial-profile.js']
 ]);
 
 export async function buildPagesSite(options = {}) {
