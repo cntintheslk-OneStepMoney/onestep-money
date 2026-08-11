@@ -10,9 +10,9 @@ function baseState() { return { automation: { enabled: true, reminders: [] }, ta
 
 test('upcoming, due-today and overdue states use local calendar dates', () => {
   const state = baseState(); state.scheduledPayments.push({ id: 'rent', title: 'Fictional rent', dueDate: '2026-10-25', status: 'scheduled' });
-  assert.equal(listFinancialReminderSources(state, new Date('2026-10-24T12:00:00+01:00'))[0].status, 'upcoming');
-  assert.equal(listFinancialReminderSources(state, new Date('2026-10-25T00:30:00+01:00'))[0].status, 'due_today');
-  assert.equal(listFinancialReminderSources(state, new Date('2026-10-26T12:00:00+00:00'))[0].status, 'overdue');
+  assert.equal(listFinancialReminderSources(state, new Date(2026, 9, 24, 12, 0))[0].status, 'upcoming');
+  assert.equal(listFinancialReminderSources(state, new Date(2026, 9, 25, 0, 30))[0].status, 'due_today');
+  assert.equal(listFinancialReminderSources(state, new Date(2026, 9, 26, 12, 0))[0].status, 'overdue');
 });
 
 test('restart-style repeated synchronisation is duplicate-safe', () => {
