@@ -82,13 +82,15 @@ export function synchroniseAutomationReviewSignals(state, input = {}, now = new 
 
 export function automationReviewSources(state, now = new Date()) {
   const automation = normaliseAutomationState(state?.automation);
-  const signalSources = Object.values(automation.reviewSignals).map((signal) => ({
-    type: signal.kind === 'rule_conflict' ? AUTOMATION_REVIEW_TYPE.RULE_CONFLICT : AUTOMATION_REVIEW_TYPE.ENGINE_ATTENTION,
-    priority: signal.priority,
-    sourceType: 'automation_review',
-    sourceId: signal.id,
-    conditionKey: [signal.reasonCode, signal.actionType, ...signal.ruleIds].join('|')
-  }));
+  const signalSources = Object.values(automation.reviewSignals)
+    .filter((signal) => automationSignalStillRelevant(state, signal))
+    .map((signal) => ({
+      type: signal.kind === 'rule_conflict' ? AUTOMATION_REVIEW_TYPE.RULE_CONFLICT : AUTOMATION_REVIEW_TYPE.ENGINE_ATTENTION,
+      priority: signal.priority,
+      sourceType: 'automation_review',
+      sourceId: signal.id,
+      conditionKey: [signal.reasonCode, signal.actionType, ...signal.ruleIds].join('|')
+    }));
 
   const recurringSources = deriveRecurringPatterns(state || {}, { includeRejected: false })
     .filter((pattern) => pattern.confirmationState === 'unconfirmed'
@@ -142,22 +144,49 @@ export function automationReviewPresentation(state, item) {
 }
 
 export function automationReviewRoute(state, item) {
+  let route;
   if (item?.type === AUTOMATION_REVIEW_TYPE.RECURRING_CONFIRMATION) {
-    return { view: 'transactions', type: 'recurring_pattern', id: item.sourceId };
+    route = { view: 'transactions', type: 'recurring_pattern', id: item.sourceId };
+  } else {
+    const signal = automationSignal(state, item?.sourceId);
+    if (item?.type === AUTOMATION_REVIEW_TYPE.RULE_CONFLICT) {
+      route = { view: 'settings', type: 'automation_rules', id: signal?.ruleIds?.[0] || null };
+    } else if (signal?.sourceType === 'transaction' && signal.sourceId) {
+      route = { view: 'transactions', type: 'transaction', id: signal.sourceId };
+    } else {
+      route = { view: 'settings', type: 'automation_rules', id: signal?.ruleIds?.[0] || null };
+    }
   }
-  const signal = automationSignal(state, item?.sourceId);
-  if (item?.type === AUTOMATION_REVIEW_TYPE.RULE_CONFLICT) {
-    return { view: 'settings', type: 'automation_rules', id: signal?.ruleIds?.[0] || null };
-  }
-  if (signal?.sourceType === 'transaction' && signal.sourceId) {
-    return { view: 'transactions', type: 'transaction', id: signal.sourceId };
-  }
-  return { view: 'settings', type: 'automation_rules', id: signal?.ruleIds?.[0] || null };
+  prepareDirectWorkflowRoute(state, route);
+  return route;
 }
 
 export function automationReviewSourceActive(state, item, now = new Date()) {
   return automationReviewSources(state, now).some((source) => source.type === item?.type
     && source.sourceType === item?.sourceType && String(source.sourceId) === String(item?.sourceId));
+}
+
+export function automationReviewPrioritySource(state, item) {
+  if (item?.type === AUTOMATION_REVIEW_TYPE.RECURRING_CONFIRMATION || item?.sourceType === 'recurring_pattern') {
+    const pattern = recurringPattern(state, item?.sourceId);
+    if (!pattern) return null;
+    return {
+      priority: item?.priority || (pattern.confidence === RECURRING_CONFIDENCE.LIKELY ? 'normal' : 'low'),
+      dueAt: pattern.nextExpected?.date || null,
+      financialRisk: null,
+      blockingSafetyCalculation: false
+    };
+  }
+
+  const signal = automationSignal(state, item?.sourceId);
+  if (!signal || !automationSignalStillRelevant(state, signal)) return null;
+  const blocksFinancialSafety = financialSafetyReason(signal.reasonCode);
+  return {
+    priority: signal.priority,
+    dueAt: signal.dueAt,
+    financialRisk: blocksFinancialSafety || signal.kind === 'rule_conflict' ? 'important' : null,
+    blockingSafetyCalculation: blocksFinancialSafety
+  };
 }
 
 export function automationSignal(state, signalIdValue) {
@@ -167,6 +196,62 @@ export function automationSignal(state, signalIdValue) {
 
 function recurringPattern(state, patternId) {
   return deriveRecurringPatterns(state || {}, { includeRejected: true }).find((pattern) => pattern.id === patternId) || null;
+}
+
+function automationSignalStillRelevant(state, signal) {
+  if (!signal) return false;
+  const automation = normaliseAutomationState(state?.automation);
+  const enabledRuleIds = new Set(automation.rules.filter((rule) => rule.enabled).map((rule) => rule.id));
+  if (signal.ruleIds?.length) {
+    const enabledCount = signal.ruleIds.filter((ruleId) => enabledRuleIds.has(ruleId)).length;
+    if (signal.kind === 'rule_conflict' && enabledCount < 2) return false;
+    if (signal.kind === 'engine_review' && enabledCount === 0) return false;
+  }
+  if (signal.sourceType === 'transaction') {
+    return (state?.transactions || []).some((transaction) => String(transaction?.id) === String(signal.sourceId) && !transaction?.deletedAt);
+  }
+  if (signal.sourceType === 'recurring_pattern') return Boolean(recurringPattern(state, signal.sourceId));
+  return true;
+}
+
+function prepareDirectWorkflowRoute(state, route) {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  queueMicrotask(async () => {
+    try {
+      const { renderRecurringActivityPanel } = await import('./recurring-finance-ui.js');
+      renderRecurringActivityPanel(state);
+      window.setTimeout(() => focusWorkflowRoute(route), 0);
+    } catch {
+      // Routing still lands on the correct existing view if an optional panel cannot render.
+    }
+  });
+}
+
+function focusWorkflowRoute(route) {
+  if (route?.type === 'automation_rules') {
+    const editButton = [...document.querySelectorAll('[data-automation-edit]')]
+      .find((element) => element.dataset.automationEdit === String(route.id || ''));
+    const panel = document.getElementById('automationRulesSettings');
+    const target = editButton || panel;
+    target?.scrollIntoView?.({ block: 'center' });
+    target?.focus?.();
+    if (editButton) {
+      editButton.click();
+      window.setTimeout(() => {
+        const form = document.getElementById('automationRuleForm');
+        form?.scrollIntoView?.({ block: 'center' });
+        form?.querySelector?.('input, select, button')?.focus?.();
+      }, 0);
+    }
+    return;
+  }
+  if (route?.type === 'recurring_pattern') {
+    const card = [...document.querySelectorAll('[data-recurring-pattern-id]')]
+      .find((element) => element.dataset.recurringPatternId === String(route.id || ''));
+    const action = card?.querySelector?.('[data-recurring-decision="confirmed"]') || card?.querySelector?.('button');
+    card?.scrollIntoView?.({ block: 'center' });
+    action?.focus?.();
+  }
 }
 
 function reviewableEngineResult(result) {
