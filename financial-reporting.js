@@ -2,6 +2,8 @@ import {
   ALL_TIME_PERIOD, availableReportingMonths, calculateBudgetAnalysis, calculatePeriodSummary,
   formatCurrency, isExternalCashflowTransaction, periodTransactions
 } from './finance-core.js';
+import { confirmedRecurringTransactionIds, deriveRecurringPatterns } from './recurring-finance.js';
+import { renderRecurringActivityPanel } from './recurring-finance-ui.js';
 
 export function buildFinancialReport(state, period = state.settings?.selectedMonth, now = new Date()) {
   const summary = calculatePeriodSummary(state, period);
@@ -24,7 +26,9 @@ export function buildFinancialReport(state, period = state.settings?.selectedMon
     ...(budget.uncategorisedActual > 0 ? [{ id: 'uncategorised', label: 'Uncategorised', amount: budget.uncategorisedActual, needsReview: true }] : [])
   ].filter((row) => row.amount !== 0).sort((left, right) => right.amount - left.amount || left.label.localeCompare(right.label));
   const recurring = recurringSplit(state, period, budget);
+  const recurringPatterns = deriveRecurringPatterns(state, { includeRejected: true });
   const comparison = period === ALL_TIME_PERIOD ? allTimeComparison(timeline) : monthlyComparison(timeline, period, now);
+  renderRecurringActivityPanel(state);
   return {
     period,
     isAllTime: period === ALL_TIME_PERIOD,
@@ -37,6 +41,7 @@ export function buildFinancialReport(state, period = state.settings?.selectedMon
     categories,
     largestCategory: categories[0] || null,
     recurring,
+    recurringPatterns,
     comparison,
     progress: buildProgress(state),
     wins: buildFinancialWins(state, comparison),
@@ -83,19 +88,20 @@ export function reportTextSummary(report) {
 
 function recurringSplit(state, period, budget) {
   const transactionsById = new Map((state.transactions || []).map((transaction) => [String(transaction.id), transaction]));
+  const confirmedIds = confirmedRecurringTransactionIds(state);
   let committed = 0;
   let flexible = 0;
   for (const row of budget.rows) {
     for (const contribution of row.contributions) {
       const transaction = transactionsById.get(String(contribution.id));
-      if (transaction?.recurring === true) committed += Number(contribution.amount || 0);
+      if (confirmedIds.has(String(transaction?.id))) committed += Number(contribution.amount || 0);
       else flexible += Number(contribution.amount || 0);
     }
   }
   const uncategorisedIds = new Set(budget.uncategorisedTransactionIds.map(String));
   for (const transaction of periodTransactions(state.transactions, period)) {
     if (!uncategorisedIds.has(String(transaction.id))) continue;
-    if (transaction.recurring === true) committed += Number(transaction.outgoing || 0);
+    if (confirmedIds.has(String(transaction.id))) committed += Number(transaction.outgoing || 0);
     else flexible += Number(transaction.outgoing || 0);
   }
   return { committed: roundMoney(committed), flexible: roundMoney(flexible), evidence: committed > 0 ? 'confirmed' : 'insufficient' };
