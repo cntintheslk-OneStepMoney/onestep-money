@@ -4,11 +4,12 @@ const delay = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
 
-async function navPoint(webContents, viewName) {
+async function pointForSelector(webContents, selector, { scroll = false } = {}) {
   return webContents.executeJavaScript(`(() => {
-    const button = [...document.querySelectorAll('.nav-button')].find((item) => item.dataset.view === ${JSON.stringify(viewName)});
-    if (!button) return null;
-    const rect = button.getBoundingClientRect();
+    const target = document.querySelector(${JSON.stringify(selector)});
+    if (!target) return null;
+    if (${scroll ? 'true' : 'false'}) target.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const rect = target.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
     const hit = document.elementFromPoint(x, y);
@@ -21,10 +22,14 @@ async function navPoint(webContents, viewName) {
     return {
       x,
       y,
-      hitView: hit?.closest?.('.nav-button')?.dataset?.view || '',
+      isTarget: Boolean(hit && (hit === target || target.contains(hit))),
       stack
     };
   })()`);
+}
+
+async function navPoint(webContents, viewName) {
+  return pointForSelector(webContents, `.nav-button[data-view=${JSON.stringify(viewName)}]`, { scroll: true });
 }
 
 function describeBlocker(point) {
@@ -49,26 +54,40 @@ async function viewIsActive(webContents, viewName) {
   })()`);
 }
 
+async function dialogIsOpen(webContents, id) {
+  return webContents.executeJavaScript(`Boolean(document.getElementById(${JSON.stringify(id)})?.open)`);
+}
+
 if (process.argv.includes('--capture-ui')) {
   app.on('browser-window-created', (_event, browserWindow) => {
     browserWindow.webContents.once('did-finish-load', async () => {
       await delay(650);
       try {
         const settings = await navPoint(browserWindow.webContents, 'settings');
-        if (!settings || settings.hitView !== 'settings') {
-          throw new Error(`Sidebar click target is obscured by ${describeBlocker(settings)}.`);
+        if (!settings || !settings.isTarget) {
+          throw new Error(`Sidebar Settings click target is obscured by ${describeBlocker(settings)}.`);
         }
         sendClick(browserWindow.webContents, settings);
         await delay(120);
         if (!await viewIsActive(browserWindow.webContents, 'settings')) throw new Error('Settings did not activate from a real mouse click.');
 
         const dashboard = await navPoint(browserWindow.webContents, 'dashboard');
-        if (!dashboard || dashboard.hitView !== 'dashboard') {
+        if (!dashboard || !dashboard.isTarget) {
           throw new Error(`Dashboard click target is obscured by ${describeBlocker(dashboard)}.`);
         }
         sendClick(browserWindow.webContents, dashboard);
         await delay(120);
         if (!await viewIsActive(browserWindow.webContents, 'dashboard')) throw new Error('Dashboard did not reactivate from a real mouse click.');
+
+        const customise = await pointForSelector(browserWindow.webContents, '#customiseDashboardButton');
+        if (!customise || !customise.isTarget) {
+          throw new Error(`Dashboard control is obscured by ${describeBlocker(customise)}.`);
+        }
+        sendClick(browserWindow.webContents, customise);
+        await delay(120);
+        if (!await dialogIsOpen(browserWindow.webContents, 'dashboardDialog')) {
+          throw new Error('Dashboard customisation did not open from a real mouse click.');
+        }
 
         console.log('Electron interaction smoke passed.');
       } catch (error) {
