@@ -2,6 +2,22 @@
 
 This file records the user-facing and release-relevant changes prepared for OneStep Money. Publication and shipped status remain authoritative in the GitHub release/project records.
 
+## 2.2.2 — Click Interaction Fix
+
+### Bug
+- Kept the notification layer out of Chromium's Popover top layer so it cannot intercept application-wide mouse input (#145).
+- Restored reliable physical mouse interaction across sidebar navigation and ordinary Dashboard controls.
+
+### Maintenance
+- Added a Windows Electron interaction smoke using real mouse input, scroll-aware sidebar hit-testing and a renderer-bound Dashboard modal action.
+- Updated application package and lockfile metadata for v2.2.2.
+
+### Data/Migration
+- No stored-data format or migration changes.
+
+### Known Limitations
+- Automated interaction coverage validates core navigation and a representative renderer-bound Dashboard control; final interactive Windows review remains required.
+
 ## 2.2.1 — Interaction Hotfix
 
 ### Bug
