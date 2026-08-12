@@ -1,0 +1,44 @@
+name: Repair v2.2.3 patch script
+
+on:
+  push:
+    branches:
+      - fix/delayed-click-interception
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/delayed-click-interception
+          fetch-depth: 0
+      - name: Repair and re-arm focused patch workflow
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/apply-v223-delayed-interaction.yml')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ("    if: github.actor != 'github-actions[bot]'", "    if: always()"),
+              ("ui_text, count = test_pattern.subn(test_replacement, ui_text, count=1)", "ui_text, count = test_pattern.subn(lambda _match: test_replacement, ui_text, count=1)"),
+              ("assert.match(smoke, /Delayed Dashboard customisation/);", "assert.match(smoke, /assertDashboardControl\\(browserWindow, 'Delayed'\\)/);")
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one patch-script target for {old!r}, found {text.count(old)}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          rm .github/workflows/repair-v223-patch-script.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/apply-v223-delayed-interaction.yml .github/workflows/repair-v223-patch-script.yml
+          git commit -m "[v2.2.3][Maintenance] Re-arm delayed interaction patch" -m "Purpose: Correct the failed branch-only patch script without changing application source in this commit." -m "Changes: Use a literal regex replacement, correct its delayed-smoke assertion, and allow one automation-triggered execution." -m "Verification: The repaired workflow must remove itself after producing the focused v2.2.3 source commit." -m "Issue: #145"
+          git push origin HEAD:fix/delayed-click-interception
