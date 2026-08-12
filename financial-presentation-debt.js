@@ -94,25 +94,54 @@ function handleDocumentChange(event) {
 }
 
 function observeDebtRenders() {
-  const targets = ['appShell', 'view-debts', 'debtCards', 'debtTotalValue', 'overdraftTotalValue'];
-  for (const id of targets) {
-    const target = document.getElementById(id);
-    if (!target) continue;
+  const shell = document.getElementById('appShell');
+  if (shell) {
+    const observer = new MutationObserver(() => scheduleRefresh());
+    observer.observe(shell, { attributes: true, attributeFilter: ['hidden'] });
+  }
+
+  const view = document.getElementById('view-debts');
+  if (view) {
+    const observer = new MutationObserver(() => scheduleRefresh());
+    observer.observe(view, { attributes: true, attributeFilter: ['hidden', 'class'] });
+  }
+
+  const cards = document.getElementById('debtCards');
+  if (cards) {
     const observer = new MutationObserver(() => {
       hideLegacyDebtPlan();
       scheduleRefresh();
     });
-    observer.observe(target, { attributes: true, childList: true, characterData: true, subtree: id !== 'appShell' && id !== 'view-debts' });
+    observer.observe(cards, { childList: true });
   }
+
+  for (const id of ['debtTotalValue', 'overdraftTotalValue']) {
+    const target = document.getElementById(id);
+    if (!target) continue;
+    const observer = new MutationObserver(() => scheduleRefresh());
+    observer.observe(target, { childList: true, characterData: true, subtree: true });
+  }
+
   hideLegacyDebtPlan();
 }
 
 function hideLegacyDebtPlan() {
   const legacy = document.querySelector('#debtCards > .check-card');
-  if (!legacy) return;
-  legacy.hidden = true;
-  legacy.setAttribute('aria-hidden', 'true');
-  legacy.dataset.replacedByDebtRecommendation = 'true';
+  if (!legacy) return false;
+  let changed = false;
+  if (!legacy.hidden) {
+    legacy.hidden = true;
+    changed = true;
+  }
+  if (legacy.getAttribute('aria-hidden') !== 'true') {
+    legacy.setAttribute('aria-hidden', 'true');
+    changed = true;
+  }
+  if (legacy.dataset.replacedByDebtRecommendation !== 'true') {
+    legacy.dataset.replacedByDebtRecommendation = 'true';
+    changed = true;
+  }
+  return changed;
 }
 
 function scheduleRefresh() {
