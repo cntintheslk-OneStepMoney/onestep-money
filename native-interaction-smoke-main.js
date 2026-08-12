@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { app, screen } from 'electron';
 const execFileAsync = promisify(execFile);
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const enabled = process.platform === 'win32' && process.argv.includes('--interaction-smoke');
 const diagnostics = [];
 let complete = false;
