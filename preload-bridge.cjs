@@ -1,5 +1,45 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function installNotificationLayerMainWorldGuard() {
+  if (typeof contextBridge.executeInMainWorld !== 'function') return;
+  contextBridge.executeInMainWorld({
+    func: () => {
+      const nativeMatches = Element.prototype.matches;
+      const nativeShowPopover = HTMLElement.prototype.showPopover;
+      const nativeHidePopover = HTMLElement.prototype.hidePopover;
+      const isNotificationLayer = (element) => element?.id === 'notificationLayer';
+
+      Element.prototype.matches = function matches(selector) {
+        if (isNotificationLayer(this) && selector === ':popover-open') return !this.hidden;
+        return nativeMatches.call(this, selector);
+      };
+
+      if (typeof nativeShowPopover === 'function') {
+        HTMLElement.prototype.showPopover = function showPopover(...args) {
+          if (isNotificationLayer(this)) {
+            this.hidden = false;
+            return undefined;
+          }
+          return nativeShowPopover.apply(this, args);
+        };
+      }
+
+      if (typeof nativeHidePopover === 'function') {
+        HTMLElement.prototype.hidePopover = function hidePopover(...args) {
+          if (isNotificationLayer(this)) {
+            this.hidden = true;
+            return undefined;
+          }
+          return nativeHidePopover.apply(this, args);
+        };
+      }
+    },
+    args: []
+  });
+}
+
+installNotificationLayerMainWorldGuard();
+
 contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   getAppVersion: () => ipcRenderer.invoke('app:version'),
   loadState: () => ipcRenderer.invoke('state:load'),
@@ -46,18 +86,20 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
 function hardenInitialInteractionSurface() {
   const layer = document.getElementById('notificationLayer');
   if (layer) {
-    layer.style.inset = 'auto 18px 18px auto';
-    layer.style.width = 'min(380px, calc(100vw - 36px))';
-    layer.style.maxWidth = '380px';
-    layer.style.height = 'auto';
-    layer.style.maxHeight = 'calc(100vh - 36px)';
-    layer.style.margin = '0';
+    if (typeof layer.matches === 'function' && layer.matches(':popover-open') && typeof layer.hidePopover === 'function') {
+      layer.hidePopover();
+    }
+    layer.removeAttribute('popover');
+    layer.style.inset = '';
+    layer.style.width = '';
+    layer.style.maxWidth = '';
+    layer.style.height = '';
+    layer.style.maxHeight = '';
+    layer.style.margin = '';
 
     const toast = document.getElementById('toast');
     const updateRegion = document.getElementById('updateNotificationRegion');
-    if (typeof layer.matches === 'function' && layer.matches(':popover-open') && toast?.hidden && updateRegion?.hidden && typeof layer.hidePopover === 'function') {
-      layer.hidePopover();
-    }
+    layer.hidden = Boolean(toast?.hidden && updateRegion?.hidden);
   }
 
   document.querySelectorAll('dialog[open]').forEach((dialog) => {

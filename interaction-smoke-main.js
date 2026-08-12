@@ -12,12 +12,29 @@ async function navPoint(webContents, viewName) {
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
     const hit = document.elementFromPoint(x, y);
+    const stack = document.elementsFromPoint(x, y).slice(0, 6).map((element) => ({
+      tag: element.tagName?.toLowerCase?.() || '',
+      id: element.id || '',
+      className: element.getAttribute?.('class') || '',
+      pointerEvents: getComputedStyle(element).pointerEvents
+    }));
     return {
       x,
       y,
-      hitView: hit?.closest?.('.nav-button')?.dataset?.view || ''
+      hitView: hit?.closest?.('.nav-button')?.dataset?.view || '',
+      stack
     };
   })()`);
+}
+
+function describeBlocker(point) {
+  const blocker = point?.stack?.[0];
+  if (!blocker) return 'unknown element';
+  const id = blocker.id ? `#${blocker.id}` : '';
+  const classes = blocker.className
+    ? `.${blocker.className.trim().split(/\s+/).filter(Boolean).join('.')}`
+    : '';
+  return `${blocker.tag || 'element'}${id}${classes} (pointer-events: ${blocker.pointerEvents || 'unknown'})`;
 }
 
 function sendClick(webContents, point) {
@@ -38,13 +55,17 @@ if (process.argv.includes('--capture-ui')) {
       await delay(650);
       try {
         const settings = await navPoint(browserWindow.webContents, 'settings');
-        if (!settings || settings.hitView !== 'settings') throw new Error('Sidebar click target is obscured.');
+        if (!settings || settings.hitView !== 'settings') {
+          throw new Error(`Sidebar click target is obscured by ${describeBlocker(settings)}.`);
+        }
         sendClick(browserWindow.webContents, settings);
         await delay(120);
         if (!await viewIsActive(browserWindow.webContents, 'settings')) throw new Error('Settings did not activate from a real mouse click.');
 
         const dashboard = await navPoint(browserWindow.webContents, 'dashboard');
-        if (!dashboard || dashboard.hitView !== 'dashboard') throw new Error('Dashboard click target is obscured.');
+        if (!dashboard || dashboard.hitView !== 'dashboard') {
+          throw new Error(`Dashboard click target is obscured by ${describeBlocker(dashboard)}.`);
+        }
         sendClick(browserWindow.webContents, dashboard);
         await delay(120);
         if (!await viewIsActive(browserWindow.webContents, 'dashboard')) throw new Error('Dashboard did not reactivate from a real mouse click.');
