@@ -265,7 +265,7 @@
 
     <dialog id="freshStartDialog" class="modal destructive-modal" aria-labelledby="freshStartDialogTitle"><form id="freshStartForm" method="dialog"><div class="modal-heading"><div><p class="eyebrow danger-eyebrow">DESTRUCTIVE ACTION</p><h2 id="freshStartDialogTitle">Start with new financial data?</h2></div><button class="icon-button" type="submit" value="cancel" aria-label="Close">×</button></div><div class="destructive-warning"><strong>Your current data will not appear in the new installation.</strong><p>OneStep will preserve the unreadable state in a separate recovery copy before creating anything new. This action should only be used when retrying and restoring a valid backup are not possible.</p></div><label class="confirmation-check"><input id="freshStartAcknowledgement" type="checkbox" />I understand that OneStep will create a new blank financial state.</label><p id="freshStartStatus" class="muted" role="status" aria-live="polite"></p><div class="modal-actions"><button type="submit" value="cancel" class="secondary-button">Cancel</button><button id="confirmFreshStartButton" type="button" class="danger-button" disabled>Start again</button></div></form></dialog>
 
-    <div id="notificationLayer" class="notification-layer" popover="manual">
+    <div id="notificationLayer" class="notification-layer">
       <div id="updateNotificationRegion" class="update-notification-region" hidden>
         <aside class="update-notification" role="status" aria-live="polite" aria-atomic="true" aria-labelledby="updateNotificationTitle">
           <button id="dismissUpdateNotificationButton" class="update-notification-close" type="button" aria-label="Dismiss update notification">×</button>
