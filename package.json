@@ -61,6 +61,7 @@
       "automation-state.js",
       "core-interactions.js",
       "interaction-smoke-main.js",
+      "native-interaction-smoke-main.js",
       "financial-reminders.js",
       "financial-reminders-ui.js",
       "financial-presentation-forecast.js",
