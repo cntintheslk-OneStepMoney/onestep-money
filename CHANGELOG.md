@@ -2,6 +2,23 @@
 
 This file records the user-facing and release-relevant changes prepared for OneStep Money. Publication and shipped status remain authoritative in the GitHub release/project records.
 
+## 2.2.3 — Delayed Interaction Fix
+
+### Bug
+- Removed browser Popover/top-layer notification presentation that could take pointer input shortly after packaged startup (#145).
+- Kept navigation and ordinary controls physically clickable after delayed update-status activity.
+
+### Maintenance
+- Removed the experimental preload main-world/global DOM prototype patching used by the v2.2.2 workaround.
+- Extended Windows Electron interaction verification to re-test real mouse input after a delayed packaged-style update notification.
+- Updated application package and lockfile metadata for v2.2.3.
+
+### Data/Migration
+- No stored-data format or migration changes.
+
+### Known Limitations
+- Automated interaction coverage models delayed update activity and representative controls; final interactive Windows review remains required.
+
 ## 2.2.2 — Click Interaction Fix
 
 ### Bug
