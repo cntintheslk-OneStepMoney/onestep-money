@@ -22,6 +22,7 @@ async function pointForSelector(webContents, selector, { scroll = false } = {}) 
     return {
       x,
       y,
+      visible: rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth,
       isTarget: Boolean(hit && (hit === target || target.contains(hit))),
       stack
     };
@@ -33,6 +34,7 @@ async function navPoint(webContents, viewName) {
 }
 
 function describeBlocker(point) {
+  if (point && !point.visible) return 'a target outside the visible Electron viewport';
   const blocker = point?.stack?.[0];
   if (!blocker) return 'unknown element';
   const id = blocker.id ? `#${blocker.id}` : '';
@@ -64,7 +66,7 @@ if (process.argv.includes('--capture-ui')) {
       await delay(650);
       try {
         const settings = await navPoint(browserWindow.webContents, 'settings');
-        if (!settings || !settings.isTarget) {
+        if (!settings || !settings.visible || !settings.isTarget) {
           throw new Error(`Sidebar Settings click target is obscured by ${describeBlocker(settings)}.`);
         }
         sendClick(browserWindow.webContents, settings);
@@ -72,7 +74,7 @@ if (process.argv.includes('--capture-ui')) {
         if (!await viewIsActive(browserWindow.webContents, 'settings')) throw new Error('Settings did not activate from a real mouse click.');
 
         const dashboard = await navPoint(browserWindow.webContents, 'dashboard');
-        if (!dashboard || !dashboard.isTarget) {
+        if (!dashboard || !dashboard.visible || !dashboard.isTarget) {
           throw new Error(`Dashboard click target is obscured by ${describeBlocker(dashboard)}.`);
         }
         sendClick(browserWindow.webContents, dashboard);
@@ -80,7 +82,7 @@ if (process.argv.includes('--capture-ui')) {
         if (!await viewIsActive(browserWindow.webContents, 'dashboard')) throw new Error('Dashboard did not reactivate from a real mouse click.');
 
         const customise = await pointForSelector(browserWindow.webContents, '#customiseDashboardButton');
-        if (!customise || !customise.isTarget) {
+        if (!customise || !customise.visible || !customise.isTarget) {
           throw new Error(`Dashboard control is obscured by ${describeBlocker(customise)}.`);
         }
         sendClick(browserWindow.webContents, customise);
