@@ -1,0 +1,29 @@
+name: Apply v2.2.3 release metadata
+
+on:
+  push:
+    branches:
+      - fix/delayed-click-interception
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/delayed-click-interception
+          fetch-depth: 0
+      - name: Align v2.2.3 metadata
+        shell: bash
+        run: |
+          python3 scripts/prepare-v223-release.py
+          rm scripts/prepare-v223-release.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md scripts/prepare-v223-release.py
+          git commit -m "[v2.2.3][Maintenance] Finalise release metadata" -m "Purpose: Align the proven delayed-interaction hotfix with v2.2.3 release metadata." -m "Changes: Bump package and lockfile metadata to 2.2.3 and add consolidated v2.2.3 changelog coverage." -m "Verification: Full Linux and Windows PR CI reruns after temporary workflow cleanup." -m "Issue: #145"
+          git push origin HEAD:fix/delayed-click-interception
