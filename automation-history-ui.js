@@ -38,12 +38,20 @@ function ensureHost() {
 function observeApp() {
   const shell = document.getElementById('appShell');
   const settings = document.getElementById('view-settings');
-  for (const target of [shell, settings].filter(Boolean)) {
+
+  if (shell) {
     const observer = new MutationObserver(() => {
       ensureHost();
       scheduleRefresh();
     });
-    observer.observe(target, { attributes: true, childList: true, subtree: target === settings });
+    observer.observe(shell, { attributes: true, attributeFilter: ['hidden'] });
+  }
+
+  if (settings) {
+    const observer = new MutationObserver(() => {
+      if (!settings.hidden || settings.classList.contains('active')) scheduleRefresh();
+    });
+    observer.observe(settings, { attributes: true, attributeFilter: ['hidden', 'class'] });
   }
 }
 
@@ -193,6 +201,11 @@ async function handleClick(event) {
   if (reviewButton) {
     const view = reviewButton.dataset.automationHistoryReview === 'transaction' ? 'transactions' : 'review';
     document.querySelector(`.nav-button[data-view="${view}"]`)?.click();
+    return;
+  }
+
+  if (event.target.closest('.nav-button[data-view="settings"], [data-automation-open], [data-automation-route], [data-automation-rule-open], [data-automation-rule-toggle]')) {
+    window.setTimeout(scheduleRefresh, 120);
   }
 }
 
