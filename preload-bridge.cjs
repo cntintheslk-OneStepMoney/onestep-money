@@ -43,6 +43,29 @@ contextBridge.exposeInMainWorld('financeAPI', Object.freeze({
   }
 }));
 
+function hardenInitialInteractionSurface() {
+  const layer = document.getElementById('notificationLayer');
+  if (layer) {
+    layer.style.inset = 'auto 18px 18px auto';
+    layer.style.width = 'min(380px, calc(100vw - 36px))';
+    layer.style.maxWidth = '380px';
+    layer.style.height = 'auto';
+    layer.style.maxHeight = 'calc(100vh - 36px)';
+    layer.style.margin = '0';
+
+    const toast = document.getElementById('toast');
+    const updateRegion = document.getElementById('updateNotificationRegion');
+    if (typeof layer.matches === 'function' && layer.matches(':popover-open') && toast?.hidden && updateRegion?.hidden && typeof layer.hidePopover === 'function') {
+      layer.hidePopover();
+    }
+  }
+
+  document.querySelectorAll('dialog[open]').forEach((dialog) => {
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  });
+}
+
 function loadCoreInteractionModule() {
   const source = 'core-interactions.js';
   if (document.querySelector(`script[data-core-interactions="${source}"]`)) return;
@@ -94,10 +117,12 @@ function loadAutomationDashboardModule() {
 }
 
 function loadLocalPresentationModules() {
+  hardenInitialInteractionSurface();
   loadCoreInteractionModule();
   loadFinancialPresentationModules();
   loadAutomationHistoryModule();
   loadAutomationDashboardModule();
+  window.requestAnimationFrame(() => hardenInitialInteractionSurface());
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
