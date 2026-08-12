@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { runStoredAutomationRulesWithHistory } from './automation-history-runner.js';
 import { previewStoredAutomationRules } from './automation-rules.js';
 import './interaction-smoke-main.js';
+import './native-interaction-smoke-main.js';
 import './main-process.js';
 
 const MAX_AUTOMATION_STATE_BYTES = 25_000_000;
