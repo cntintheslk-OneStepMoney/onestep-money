@@ -124,7 +124,7 @@ test('notification markup and styles preserve accessibility, minimum sizing and 
   assert.match(html, /data-restart-update/);
   assert.match(html, /data-view-update/);
   assert.match(html, /<progress[^>]+max="100"/);
-  assert.match(html, /id="notificationLayer"[^>]+popover="manual"/);
+  assert.doesNotMatch(html, /id="notificationLayer"[^>]+popover=/);
   assert.match(css, /\.notification-layer \{[^}]*position: fixed;[^}]*z-index: 2147483647/);
   assert.match(css, /\.update-notification-region \{[^}]*width: min\(340px/);
   assert.match(css, /max-width: 340px/);
