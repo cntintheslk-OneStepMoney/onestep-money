@@ -4,18 +4,21 @@ function installNotificationLayerMainWorldGuard() {
   if (typeof contextBridge.executeInMainWorld !== 'function') return;
   contextBridge.executeInMainWorld({
     func: () => {
-      const nativeMatches = Element.prototype.matches;
-      const nativeShowPopover = HTMLElement.prototype.showPopover;
-      const nativeHidePopover = HTMLElement.prototype.hidePopover;
+      const ElementConstructor = globalThis.Element;
+      const HTMLElementConstructor = globalThis.HTMLElement;
+      if (!ElementConstructor || !HTMLElementConstructor) return;
+      const nativeMatches = ElementConstructor.prototype.matches;
+      const nativeShowPopover = HTMLElementConstructor.prototype.showPopover;
+      const nativeHidePopover = HTMLElementConstructor.prototype.hidePopover;
       const isNotificationLayer = (element) => element?.id === 'notificationLayer';
 
-      Element.prototype.matches = function matches(selector) {
+      ElementConstructor.prototype.matches = function matches(selector) {
         if (isNotificationLayer(this) && selector === ':popover-open') return !this.hidden;
         return nativeMatches.call(this, selector);
       };
 
       if (typeof nativeShowPopover === 'function') {
-        HTMLElement.prototype.showPopover = function showPopover(...args) {
+        HTMLElementConstructor.prototype.showPopover = function showPopover(...args) {
           if (isNotificationLayer(this)) {
             this.hidden = false;
             return undefined;
@@ -25,7 +28,7 @@ function installNotificationLayerMainWorldGuard() {
       }
 
       if (typeof nativeHidePopover === 'function') {
-        HTMLElement.prototype.hidePopover = function hidePopover(...args) {
+        HTMLElementConstructor.prototype.hidePopover = function hidePopover(...args) {
           if (isNotificationLayer(this)) {
             this.hidden = true;
             return undefined;
