@@ -778,7 +778,6 @@ tr:last-child td { border-bottom: 0; }
   background: transparent;
   border: 0;
 }
-.notification-layer::backdrop { background: transparent; pointer-events: none; }
 .update-notification-region { width: min(340px, calc(100vw - 36px)); pointer-events: auto; }
 .update-notification {
   position: relative;

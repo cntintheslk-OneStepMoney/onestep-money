@@ -4,6 +4,8 @@ const delay = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
 
+let interactionSmokeComplete = false;
+
 async function pointForSelector(webContents, selector, { scroll = false } = {}) {
   return webContents.executeJavaScript(`(() => {
     const target = document.querySelector(${JSON.stringify(selector)});
@@ -60,39 +62,90 @@ async function dialogIsOpen(webContents, id) {
   return webContents.executeJavaScript(`Boolean(document.getElementById(${JSON.stringify(id)})?.open)`);
 }
 
+async function closeDialog(webContents, id) {
+  return webContents.executeJavaScript(`(() => {
+    const dialog = document.getElementById(${JSON.stringify(id)});
+    if (dialog?.open) dialog.close();
+    return Boolean(dialog && !dialog.open);
+  })()`);
+}
+
+async function notificationState(webContents) {
+  return webContents.executeJavaScript(`(() => {
+    const layer = document.getElementById('notificationLayer');
+    const region = document.getElementById('updateNotificationRegion');
+    return {
+      layerHidden: Boolean(layer?.hidden),
+      regionHidden: Boolean(region?.hidden),
+      hasPopoverAttribute: Boolean(layer?.hasAttribute('popover'))
+    };
+  })()`);
+}
+
+async function assertNavigationClick(browserWindow, viewName, label) {
+  const point = await navPoint(browserWindow.webContents, viewName);
+  if (!point || !point.visible || !point.isTarget) {
+    throw new Error(`${label} click target is obscured by ${describeBlocker(point)}.`);
+  }
+  sendClick(browserWindow.webContents, point);
+  await delay(140);
+  if (!await viewIsActive(browserWindow.webContents, viewName)) {
+    throw new Error(`${label} did not activate from a real mouse click.`);
+  }
+}
+
+async function assertDashboardControl(browserWindow, phase) {
+  const customise = await pointForSelector(browserWindow.webContents, '#customiseDashboardButton');
+  if (!customise || !customise.visible || !customise.isTarget) {
+    throw new Error(`${phase} Dashboard control is obscured by ${describeBlocker(customise)}.`);
+  }
+  sendClick(browserWindow.webContents, customise);
+  await delay(140);
+  if (!await dialogIsOpen(browserWindow.webContents, 'dashboardDialog')) {
+    throw new Error(`${phase} Dashboard customisation did not open from a real mouse click.`);
+  }
+  await closeDialog(browserWindow.webContents, 'dashboardDialog');
+}
+
 if (process.argv.includes('--capture-ui')) {
+  app.on('before-quit', (event) => {
+    if (!interactionSmokeComplete) event.preventDefault();
+  });
+
   app.on('browser-window-created', (_event, browserWindow) => {
     browserWindow.webContents.once('did-finish-load', async () => {
       await delay(650);
       try {
-        const settings = await navPoint(browserWindow.webContents, 'settings');
-        if (!settings || !settings.visible || !settings.isTarget) {
-          throw new Error(`Sidebar Settings click target is obscured by ${describeBlocker(settings)}.`);
-        }
-        sendClick(browserWindow.webContents, settings);
-        await delay(120);
-        if (!await viewIsActive(browserWindow.webContents, 'settings')) throw new Error('Settings did not activate from a real mouse click.');
+        await assertNavigationClick(browserWindow, 'settings', 'Early Settings');
+        await assertNavigationClick(browserWindow, 'dashboard', 'Early Dashboard');
+        await assertDashboardControl(browserWindow, 'Early');
 
-        const dashboard = await navPoint(browserWindow.webContents, 'dashboard');
-        if (!dashboard || !dashboard.visible || !dashboard.isTarget) {
-          throw new Error(`Dashboard click target is obscured by ${describeBlocker(dashboard)}.`);
-        }
-        sendClick(browserWindow.webContents, dashboard);
-        await delay(120);
-        if (!await viewIsActive(browserWindow.webContents, 'dashboard')) throw new Error('Dashboard did not reactivate from a real mouse click.');
+        await delay(3600);
+        browserWindow.webContents.send('update:status', {
+          state: 'available',
+          message: 'A newer OneStep Money version is available.',
+          version: '9.9.9',
+          currentVersion: app.getVersion()
+        });
+        await delay(250);
 
-        const customise = await pointForSelector(browserWindow.webContents, '#customiseDashboardButton');
-        if (!customise || !customise.visible || !customise.isTarget) {
-          throw new Error(`Dashboard control is obscured by ${describeBlocker(customise)}.`);
+        const notification = await notificationState(browserWindow.webContents);
+        if (!notification || notification.regionHidden || notification.layerHidden) {
+          throw new Error('Delayed update notification did not become visible for interaction verification.');
         }
-        sendClick(browserWindow.webContents, customise);
-        await delay(120);
-        if (!await dialogIsOpen(browserWindow.webContents, 'dashboardDialog')) {
-          throw new Error('Dashboard customisation did not open from a real mouse click.');
+        if (notification.hasPopoverAttribute) {
+          throw new Error('Notification layer still uses the browser Popover top layer.');
         }
 
-        console.log('Electron interaction smoke passed.');
+        await assertNavigationClick(browserWindow, 'settings', 'Delayed Settings');
+        await assertNavigationClick(browserWindow, 'dashboard', 'Delayed Dashboard');
+        await assertDashboardControl(browserWindow, 'Delayed');
+
+        interactionSmokeComplete = true;
+        console.log('Electron delayed interaction smoke passed.');
+        app.quit();
       } catch (error) {
+        interactionSmokeComplete = true;
         console.error(`Electron interaction smoke failed: ${error.message}`);
         app.exit(1);
       }

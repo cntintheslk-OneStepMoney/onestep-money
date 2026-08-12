@@ -48,19 +48,21 @@ test('payments pagination reports full-result counts and has keyboard-operable n
   assert.doesNotMatch(renderer, /rows\.slice\(0, 300\)/);
 });
 
-test('all transient and update notifications share a promoted browser top layer', async () => {
+test('transient and update notifications stay above the app without entering the browser top layer', async () => {
   const [html, renderer, css] = await Promise.all([
     fs.readFile(new URL('../index.html', import.meta.url), 'utf8'),
     fs.readFile(new URL('../renderer-app.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../styles.css', import.meta.url), 'utf8')
   ]);
 
-  assert.match(html, /id="notificationLayer"[^>]+popover="manual"[\s\S]+id="updateNotificationRegion"[\s\S]+id="toast"/);
-  assert.match(renderer, /observer\.observe\(document\.body, \{ attributes: true, subtree: true, attributeFilter: \['open'\] \}\)/);
-  assert.match(renderer, /syncNotificationLayer\(true\)/);
-  assert.match(renderer, /layer\.showPopover\(\)/);
-  assert.match(css, /\.notification-layer \{[^}]*position: fixed;[^}]*inset: 0;[^}]*z-index: 2147483647/);
-  assert.match(css, /\.notification-layer::backdrop \{ background: transparent; pointer-events: none; \}/);
+  assert.match(html, /id="notificationLayer" class="notification-layer"[\s\S]+id="updateNotificationRegion"[\s\S]+id="toast"/);
+  assert.doesNotMatch(html, /id="notificationLayer"[^>]+popover=/);
+  assert.match(renderer, /const shouldShow = !byId\('toast'\)\.hidden \|\| !byId\('updateNotificationRegion'\)\.hidden/);
+  assert.match(renderer, /layer\.hidden = !shouldShow/);
+  assert.doesNotMatch(renderer, /showPopover|hidePopover|:popover-open/);
+  assert.match(css, /\.notification-layer \{[^}]*position: fixed;[^}]*inset: 0;[^}]*z-index: 2147483647[^}]*pointer-events: none/);
+  assert.match(css, /\.update-notification-region \{[^}]*pointer-events: auto/);
+  assert.doesNotMatch(css, /\.notification-layer::backdrop/);
 });
 
 test('Review Inbox uses accessible controls, restrained counts and progressive disclosure', async () => {

@@ -2334,27 +2334,12 @@ function requiredPaymentLabel(item) { const value = item.arrangementStatus === '
 function paymentStatusLabel(item) { return `${requiredPaymentLabel(item)} · ${arrangementLabel(item)}`; }
 function limitAprLabel(item) { return `${item.limit == null ? 'Unknown' : formatCurrency(item.limit)} · ${item.apr == null ? 'APR unknown' : `${(item.apr * 100).toFixed(2)}%`}`; }
 function initialiseNotificationLayer() {
-  const observer = new MutationObserver((mutations) => {
-    if (mutations.some(({ target }) => target instanceof HTMLDialogElement && target.open)) {
-      queueMicrotask(() => syncNotificationLayer(true));
-    }
-  });
-  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
+  syncNotificationLayer();
 }
-function syncNotificationLayer(promote = false) {
+function syncNotificationLayer() {
   const layer = byId('notificationLayer');
   const shouldShow = !byId('toast').hidden || !byId('updateNotificationRegion').hidden;
-  if (!layer.showPopover) {
-    layer.hidden = !shouldShow;
-    return;
-  }
-  const isOpen = layer.matches(':popover-open');
-  if (!shouldShow) {
-    if (isOpen) layer.hidePopover();
-    return;
-  }
-  if (isOpen && promote) layer.hidePopover();
-  if (!layer.matches(':popover-open')) layer.showPopover();
+  layer.hidden = !shouldShow;
 }
 function showToast(message) {
   const toast = byId('toast');
