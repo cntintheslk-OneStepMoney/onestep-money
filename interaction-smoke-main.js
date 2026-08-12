@@ -1,6 +1,8 @@
 import { app } from 'electron';
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
 
 async function navPoint(webContents, viewName) {
   return webContents.executeJavaScript(`(() => {
