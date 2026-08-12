@@ -1,0 +1,88 @@
+name: Finalise v2.2.4 metadata
+
+on:
+  push:
+    branches:
+      - fix/windows-native-input-fullscreen
+    paths:
+      - .github/workflows/finalise-v224-metadata.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/windows-native-input-fullscreen
+          fetch-depth: 0
+
+      - name: Align v2.2.4 release metadata
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const version = '2.2.4';
+          const packageJsonPath = 'package.json';
+          const packageLockPath = 'package-lock.json';
+          const changelogPath = 'CHANGELOG.md';
+
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          packageJson.version = version;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8'));
+          packageLock.version = version;
+          if (!packageLock.packages?.['']) throw new Error('package-lock root package metadata is missing.');
+          packageLock.packages[''].version = version;
+          fs.writeFileSync(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`);
+
+          const section = `## 2.2.4 — Windows Pointer and Fullscreen Rendering
+
+### Bug
+- Removed post-v2.1.26 renderer self-observation loops that could repeatedly refresh debt presentation and automation history and starve normal pointer, layout and fullscreen work (#145).
+- Restored packaged Windows native mouse interaction across sidebar navigation and ordinary Dashboard controls after delayed startup activity.
+- Verified wheel scrolling continues to reach the intended scroll surface while click input remains responsive.
+- Restored renderer, hit-test and scroll-surface resizing through maximize, fullscreen and return-to-windowed transitions.
+
+### Maintenance
+- Added privacy-safe packaged Windows native-input diagnostics using the real OS cursor/button/wheel path rather than relying only on \`webContents.sendInputEvent\`.
+- Added hit-test, viewport, scrollbar-gutter, fixed-surface and renderer-stability regression coverage for delayed startup and fullscreen transitions.
+- Kept the confirmed-working BrowserWindow/GPU configuration unchanged rather than disabling hardware acceleration or forcing content bounds speculatively.
+- Updated application package and lockfile metadata for v2.2.4.
+
+### Data/Migration
+- No stored-data format or migration changes.
+
+### Known Limitations
+- Automated packaged-Windows verification passed, but final physical Windows review by the user remains required before #145 is considered complete.
+
+`;
+
+          let changelog = fs.readFileSync(changelogPath, 'utf8');
+          if (!changelog.includes('## 2.2.4')) {
+            const marker = '## 2.2.3';
+            const index = changelog.indexOf(marker);
+            if (index < 0) throw new Error('Expected 2.2.3 changelog marker was not found.');
+            changelog = `${changelog.slice(0, index)}${section}${changelog.slice(index)}`;
+            fs.writeFileSync(changelogPath, changelog);
+          }
+          NODE
+
+          rm .github/workflows/finalise-v224-metadata.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md .github/workflows/finalise-v224-metadata.yml
+          git diff --cached --check
+          git commit \
+            -m "[v2.2.4][Maintenance] Finalise release metadata" \
+            -m "Purpose: Finalise #145 release metadata after packaged native pointer and fullscreen verification passed." \
+            -m "Changes: Align package and lockfile metadata to v2.2.4, add the consolidated v2.2.4 changelog entry, and remove this temporary branch-only metadata workflow." \
+            -m "Verification: PR #150 run #243 passed Linux and Windows tests, project/privacy checks, lint, quality benchmark, Pages smoke, Electron startup, Windows packaging, and the packaged native pointer/wheel/maximize/fullscreen smoke. Full CI will be triggered again after this metadata commit." \
+            -m "Issue: #145"
+          git push origin HEAD:fix/windows-native-input-fullscreen
