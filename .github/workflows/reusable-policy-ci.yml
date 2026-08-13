@@ -1,0 +1,37 @@
+name: Reusable policy CI
+on:
+  workflow_call:
+    inputs:
+      expected-version: { type: string, required: false, default: "" }
+      branch: { type: string, required: true }
+      pr-title: { type: string, required: false, default: "" }
+      pr-body: { type: string, required: false, default: "" }
+    secrets: {}
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { persist-credentials: false }
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Write PR evidence input
+        shell: bash
+        env:
+          PR_BODY: ${{ inputs.pr-body }}
+        run: printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+      - name: Validate policy and versions
+        env:
+          DEVOPS_EXPECTED_VERSION: ${{ inputs.expected-version }}
+          DEVOPS_BRANCH: ${{ inputs.branch }}
+          DEVOPS_PR_TITLE: ${{ inputs.pr-title }}
+          DEVOPS_PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: node scripts/policy-ci.mjs
+      - name: Test and validate adapter
+        run: npm test && npm run validate
+      - name: Dependency audit
+        run: npm audit --audit-level=low

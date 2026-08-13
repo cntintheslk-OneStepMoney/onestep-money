@@ -1,0 +1,20 @@
+name: Project sync
+on:
+  issues: { types: [opened, edited, reopened, closed, assigned, unassigned, labeled, unlabeled] }
+  workflow_dispatch:
+    inputs:
+      issue-number: { description: Optional focused Issue, required: false, type: string }
+      dry-run: { description: Audit without writes, required: false, default: false, type: boolean }
+  schedule: [{ cron: "17 3 * * *" }]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+jobs:
+  sync:
+    uses: ./.github/workflows/reusable-project-sync.yml
+    with:
+      issue-number: ${{ github.event.issue.number || inputs.issue-number || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+    secrets:
+      project-token: ${{ secrets.DEVOPS_PROJECT_TOKEN }}

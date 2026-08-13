@@ -1,0 +1,24 @@
+name: Future design brief
+description: Preserve designed work not selected for a locked release.
+title: "[Roadmap][Future Design Brief] "
+labels: []
+body:
+  - type: textarea
+    id: opportunity
+    attributes: { label: Opportunity and evidence, description: Need, expected benefit and relevant research. }
+    validations: { required: true }
+  - type: textarea
+    id: design
+    attributes: { label: Candidate design, description: Scope, alternatives, risks, dependencies and open decisions. }
+    validations: { required: true }
+  - type: dropdown
+    id: type
+    attributes: { label: Type, options: [Feature, Bug, UI/UX, Security, QOL, Maintenance, Documentation, Infrastructure, Umbrella, Design, Research] }
+    validations: { required: true }
+  - type: checkboxes
+    id: authority
+    attributes:
+      label: Authority state
+      options:
+        - label: This item is not in a locked release and does not authorize implementation.
+          required: true

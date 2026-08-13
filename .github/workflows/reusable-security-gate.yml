@@ -1,0 +1,40 @@
+name: Reusable security gate
+on:
+  workflow_call:
+    inputs:
+      base-sha: { type: string, required: true }
+      head-sha: { type: string, required: true }
+    secrets: {}
+permissions:
+  contents: read
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Automated changed-surface gate
+        env:
+          DEVOPS_BASE_SHA: ${{ inputs.base-sha }}
+          DEVOPS_HEAD_SHA: ${{ inputs.head-sha }}
+        run: node scripts/security-gate.mjs
+      - name: Dependency vulnerabilities
+        run: npm audit --audit-level=low
+      - name: Functional and policy regression
+        run: npm test && npm run validate && npm run inheritance:check
+      - name: Enforce change-aware review evidence
+        env:
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+        shell: bash
+        run: |
+          if ! grep -q '^## 8\. Security review' <<< "$PR_BODY"; then
+            echo 'Missing universal Security review evidence section' >&2
+            exit 1
+          fi
+          if ! grep -qi 'no known finding\|no identified genuine security finding\|no known genuine security finding' <<< "$PR_BODY"; then
+            echo 'Missing explicit zero-waiver security conclusion' >&2
+            exit 1
+          fi

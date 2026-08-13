@@ -1,0 +1,33 @@
+name: Release integration
+description: Reconcile and verify a locked release in development.
+title: "[Work][Release Integration] "
+labels: []
+body:
+  - type: input
+    id: release
+    attributes: { label: Target Release }
+    validations: { required: true }
+  - type: input
+    id: umbrella
+    attributes: { label: Release umbrella, placeholder: "#10" }
+    validations: { required: true }
+  - type: textarea
+    id: included
+    attributes: { label: Included Issues, PRs and dependency completion }
+    validations: { required: true }
+  - type: textarea
+    id: integration
+    attributes: { label: Integration scope and exclusions, description: Reconciliation, schemas, notes, packaging and committed release work. }
+    validations: { required: true }
+  - type: textarea
+    id: verification
+    attributes: { label: End-to-end verification and security gates }
+    validations: { required: true }
+  - type: textarea
+    id: safety
+    attributes: { label: Migration, compatibility and rollback }
+    validations: { required: true }
+  - type: input
+    id: branch
+    attributes: { label: Planned branch, placeholder: release/concise-description }
+    validations: { required: true }

@@ -1,0 +1,114 @@
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+
+const canonicalFields = ['Project', 'Priority', 'Complexity', 'Title', 'Status', 'Type', 'Target Release', 'Area', 'Branch', 'Start Date', 'Target Date'];
+const lifecycle = ['Idea', 'Backlog', 'Planned', 'In Progress', 'Review', 'Done'];
+
+export function extract(body, label) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return body?.match(new RegExp(`(?:^|\\n)(?:#{1,4}\\s*|[-*]\\s*\\*{0,2})${escaped}\\*{0,2}\\s*(?::|\\n)\\s*([^\\n]+)`, 'i'))?.[1]?.trim()?.replace(/^`|`$/g, '');
+}
+
+export function deriveIssueMetadata(issue, facts = {}) {
+  const body = issue.body ?? '';
+  const typeFromTitle = issue.title.includes('[Umbrella]') ? 'Umbrella' : (!facts.branch && issue.title.includes('[Design Brief]') ? 'Design' : undefined);
+  const status = facts.merged || issue.state === 'closed' ? 'Done' : facts.reviewReady ? 'Review' : facts.branch ? 'In Progress' : extract(body, 'Status') ?? (issue.title.includes('[Future Design Brief]') ? 'Backlog' : 'Planned');
+  const metadata = {
+    Project: facts.project, Priority: extract(body, 'Priority'), Complexity: extract(body, 'Complexity'), Status: status,
+    Type: extract(body, 'Type') ?? typeFromTitle, 'Target Release': extract(body, 'Target Release') ?? issue.title.match(/\[v(\d+\.\d+\.\d+)\]/i)?.[1]?.replace(/^/, 'v'),
+    Area: extract(body, 'Area'), Branch: facts.branch, 'Start Date': facts.startDate, 'Target Date': extract(body, 'Target Date')
+  };
+  return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined && value !== ''));
+}
+
+export function validateProjectSchema(fields, areas = []) {
+  const errors = [];
+  for (const name of canonicalFields) if (!fields[name]) errors.push(`missing Project field: ${name}`);
+  const statusOptions = fields.Status?.options?.map(option => option.name) ?? [];
+  for (const value of lifecycle) if (!statusOptions.includes(value)) errors.push(`missing Status option: ${value}`);
+  if (areas.length && !areas.every(area => typeof area === 'string' && area.trim())) errors.push('adapter areas must be non-empty strings');
+  return errors;
+}
+
+export function planUpdates(metadata, fields, current = {}) {
+  const updates = [];
+  for (const [name, value] of Object.entries(metadata)) {
+    const field = fields[name];
+    if (!field || current[name] === value) continue;
+    if (field.options) {
+      const option = field.options.find(entry => entry.name === value);
+      if (!option) throw new Error(`unknown ${name} option: ${value}`);
+      updates.push({ fieldId: field.id, kind: 'singleSelectOptionId', value: option.id, name, display: value });
+    } else updates.push({ fieldId: field.id, kind: name.includes('Date') ? 'date' : 'text', value, name, display: value });
+  }
+  return updates;
+}
+
+class GitHub {
+  constructor(token, repository) { this.token = token; [this.owner, this.repo] = repository.split('/'); }
+  async request(url, options = {}) {
+    const response = await fetch(url, { ...options, headers: { authorization: `Bearer ${this.token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...options.headers } });
+    if (!response.ok) throw new Error(`GitHub ${response.status}: ${await response.text()}`);
+    return response.json();
+  }
+  rest(path) { return this.request(`https://api.github.com/repos/${this.owner}/${this.repo}${path}`); }
+  async graphql(query, variables) {
+    const result = await this.request('https://api.github.com/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query, variables }) });
+    if (result.errors) throw new Error(result.errors.map(error => error.message).join('; '));
+    return result.data;
+  }
+}
+
+async function projectContext(client, adapter) {
+  const ownerField = adapter.project.ownerType === 'organization' ? 'organization' : 'user';
+  const query = `query($login:String!,$number:Int!){${ownerField}(login:$login){projectV2(number:$number){id fields(first:50){nodes{... on ProjectV2Field{id name dataType} ... on ProjectV2SingleSelectField{id name options{id name}}}}}}}`;
+  const data = await client.graphql(query, { login: adapter.project.owner, number: adapter.project.number });
+  const project = data[ownerField]?.projectV2;
+  if (!project) throw new Error('configured Project not found');
+  return { id: project.id, fields: Object.fromEntries(project.fields.nodes.filter(Boolean).map(field => [field.name, field])) };
+}
+
+async function ensureItem(client, projectId, contentId) {
+  const mutation = `mutation($project:ID!,$content:ID!){addProjectV2ItemById(input:{projectId:$project,contentId:$content}){item{id}}}`;
+  return (await client.graphql(mutation, { project: projectId, content: contentId })).addProjectV2ItemById.item.id;
+}
+
+async function applyUpdate(client, projectId, itemId, update) {
+  const value = { [update.kind]: update.value };
+  const mutation = `mutation($project:ID!,$item:ID!,$field:ID!,$value:ProjectV2FieldValue!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:$value}){projectV2Item{id}}}`;
+  await client.graphql(mutation, { project: projectId, item: itemId, field: update.fieldId, value });
+}
+
+async function syncIssue(client, context, adapter, issue, dryRun) {
+  const branches = await client.rest('/branches?per_page=100');
+  const planned = extract(issue.body, 'Planned branch');
+  const pulls = planned ? await client.rest(`/pulls?state=all&per_page=100&head=${encodeURIComponent(`${client.owner}:${planned}`)}`) : [];
+  const pr = pulls[0];
+  const branch = planned && (pr || branches.some(entry => entry.name === planned)) ? planned : undefined;
+  const startDate = pr?.created_at?.slice(0, 10) ?? (branch ? issue.created_at?.slice(0, 10) : undefined);
+  const metadata = deriveIssueMetadata(issue, { project: adapter.project.displayName, branch, startDate, reviewReady: Boolean(pr?.draft === false && !pr?.merged_at), merged: Boolean(pr?.merged_at) });
+  if (metadata.Area && !adapter.areas.includes(metadata.Area)) throw new Error(`Area not allowed by adapter: ${metadata.Area}`);
+  const updates = planUpdates(metadata, context.fields);
+  if (dryRun) return { issue: issue.number, metadata, updates };
+  const itemId = await ensureItem(client, context.id, issue.node_id);
+  for (const update of updates) await applyUpdate(client, context.id, itemId, update);
+  return { issue: issue.number, metadata, updates: updates.map(update => update.name) };
+}
+
+async function main() {
+  const adapter = JSON.parse(await readFile(process.env.DEVOPS_ADAPTER ?? '.development-operations.yml', 'utf8'));
+  const token = process.env.DEVOPS_PROJECT_TOKEN;
+  const repository = process.env.GITHUB_REPOSITORY ?? adapter.project.repository;
+  if (!token) throw new Error('DEVOPS_PROJECT_TOKEN is required');
+  const client = new GitHub(token, repository);
+  const context = await projectContext(client, adapter);
+  const errors = validateProjectSchema(context.fields, adapter.areas);
+  if (errors.length) throw new Error(errors.join('; '));
+  const issueNumber = Number(process.env.DEVOPS_ISSUE_NUMBER || 0);
+  const issues = issueNumber ? [await client.rest(`/issues/${issueNumber}`)] : (await client.rest('/issues?state=all&per_page=100')).filter(item => !item.pull_request);
+  const results = [];
+  for (const issue of issues) results.push(await syncIssue(client, context, adapter, issue, process.argv.includes('--dry-run')));
+  console.log(JSON.stringify(results, null, 2));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => { console.error(error.message); process.exitCode = 1; });

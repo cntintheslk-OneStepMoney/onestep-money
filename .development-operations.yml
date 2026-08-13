@@ -1,0 +1,110 @@
+{
+  "$schema": "./schemas/repository-adapter.schema.json",
+  "standardsVersion": "0.2.0",
+  "project": {
+    "displayName": "OneStep Money Development",
+    "repository": "cntintheslk-OneStepMoney/onestep-money",
+    "owner": "cntintheslk-OneStepMoney",
+    "ownerType": "user",
+    "number": 4,
+    "centralPortfolio": {
+      "owner": "cntintheslk-OneStepMoney",
+      "ownerType": "user",
+      "number": 5
+    }
+  },
+  "areas": [
+    "AI / Coaching / Engagement",
+    "AI / Coaching / Financial Safety",
+    "AI / Conversation / Explainability",
+    "AI / Financial Core / Privacy",
+    "AI / Privacy / Runtime",
+    "AI Companion / Settings / Accessibility",
+    "AI Companion / UI",
+    "Ask Privately / UI/UX",
+    "Automation / Dashboard / Settings",
+    "Automation / Financial Safety / State",
+    "Automation / History / Data Integrity",
+    "Automation / Navigation / UI state",
+    "Automation / Rules / Review",
+    "Automation / Rules / Settings",
+    "Business / Accounts / Reporting",
+    "Coaching / Progress / Engagement",
+    "Credit Report / Imports / Financial Data",
+    "Dashboard / Payments / Financial calculations",
+    "Dashboard / Responsive layout / Personalisation",
+    "Dashboard / Today / Navigation",
+    "Debt / Financial Safety / Automation / Payday",
+    "Demo / UI/UX",
+    "Engagement / Check-ins / Date handling",
+    "Financial Core / Automation / Data Model",
+    "Forecasting / Financial Core / Dashboard / Today",
+    "Income / Payday / Settings",
+    "Income / Today / Financial Safety / Automation",
+    "Payday / Budget / Debt / Financial Safety",
+    "Payments / Budget / Categorisation",
+    "Payments / Commitments / Income / Automation",
+    "Payments / Review Inbox / Categorisation",
+    "Release Integration / AI / Quality",
+    "Release Integration / Subscriptions / Quality",
+    "Repository / Git History / Maintenance",
+    "Review Inbox / Today / Automation",
+    "Review Inbox / UI/UX",
+    "Settings / Data Management",
+    "Statements / Imports / Review Inbox / Automation",
+    "Subscriptions / Cancellation Guidance",
+    "Subscriptions / Financial Intelligence / Financial Safety",
+    "Subscriptions / Recurring Payments / Financial Core",
+    "Subscriptions / Review Inbox / Data Integrity",
+    "Subscriptions / UI / Financial Presentation",
+    "Today / Commitments / Automation",
+    "Today / Review Inbox / Automation / AI",
+    "UI/UX / Packaging / Branding",
+    "UI/UX / Theme"
+  ],
+  "platforms": ["windows", "electron", "github-pages"],
+  "commands": {
+    "test": "npm test",
+    "validate": "npm run check",
+    "lint": "npm run lint",
+    "desktop": "npm start",
+    "windowsPackage": "npm run dist:win",
+    "pagesBuild": "npm run build:pages",
+    "pagesSmoke": "npm run smoke:pages"
+  },
+  "policyReferences": ["README.md", "CONTRIBUTING.md", "SECURITY.md"],
+  "security": {
+    "threatExtensions": [
+      "local financial state and encrypted document vault",
+      "backup restore and corrupt-state recovery",
+      "Electron IPC and restricted document viewing",
+      "Windows NSIS packaging and update metadata",
+      "no telemetry analytics cloud financial storage or remote crash reporting",
+      "fictional and anonymised repository test data only"
+    ]
+  },
+  "inheritance": {
+    "preserve": [".github/PULL_REQUEST_TEMPLATE.md", "SECURITY.md"]
+  },
+  "overrides": {
+    "branchMigration": {
+      "currentIntegrationBranch": "main",
+      "currentProductionEquivalent": "main",
+      "state": "legacy-main-preserved-until-deliberate-migration",
+      "directPushAllowed": false,
+      "draftPullRequestsRequired": true
+    },
+    "productSafety": {
+      "financialSafetyAuthoritative": true,
+      "localFirstOfflineCapable": true,
+      "telemetryAllowed": false,
+      "cloudFinancialStorageAllowed": false
+    },
+    "release": {
+      "primaryPlatform": "Windows",
+      "installer": "NSIS",
+      "updateMetadataRequired": "latest.yml",
+      "automaticDownloadOrInstallAllowed": false
+    }
+  }
+}

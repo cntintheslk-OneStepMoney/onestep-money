@@ -1,0 +1,14 @@
+name: Policy CI
+on:
+  pull_request:
+    branches: [main, development, production]
+permissions:
+  contents: read
+jobs:
+  policy:
+    uses: ./.github/workflows/reusable-policy-ci.yml
+    with:
+      expected-version: ""
+      branch: ${{ github.head_ref }}
+      pr-title: ${{ github.event.pull_request.title }}
+      pr-body: ${{ github.event.pull_request.body || '' }}

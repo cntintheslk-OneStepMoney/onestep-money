@@ -1,0 +1,24 @@
+name: Design brief
+description: Define proposed work before implementation authority.
+title: "[Roadmap][Design Brief] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: Problem and objective, description: User need, evidence and intended outcome. }
+    validations: { required: true }
+  - type: textarea
+    id: design
+    attributes: { label: Proposed design and scope, description: Behavior, UX, architecture, alternatives and boundaries. }
+    validations: { required: true }
+  - type: textarea
+    id: contract
+    attributes: { label: Execution contract, description: Release, Type, Priority, Complexity, Area, dependencies, exclusions, acceptance, verification, safety and planned branch. }
+    validations: { required: true }
+  - type: checkboxes
+    id: authority
+    attributes:
+      label: Authority state
+      options:
+        - label: This is a proposal and does not authorize implementation until owner-approved and locked.
+          required: true
