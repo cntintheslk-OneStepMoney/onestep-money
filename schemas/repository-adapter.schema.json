@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://development-operations.local/schemas/repository-adapter.schema.json",
+  "title": "Development Operations repository adapter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["standardsVersion", "project", "areas", "platforms", "commands", "policyReferences", "security", "overrides"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "standardsVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "project": {
+      "type": "object", "additionalProperties": false,
+      "required": ["displayName", "repository", "owner", "ownerType", "number"],
+      "properties": {
+        "displayName": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "owner": { "type": "string", "minLength": 1 },
+        "ownerType": { "enum": ["user", "organization"] },
+        "number": { "type": "integer", "minimum": 1 },
+        "centralPortfolio": { "$ref": "#/$defs/projectIdentity" }
+      }
+    },
+    "areas": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "platforms": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "commands": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+    "policyReferences": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "security": { "type": "object", "additionalProperties": false, "required": ["threatExtensions"], "properties": { "threatExtensions": { "type": "array", "items": { "type": "string" } } } },
+    "inheritance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preserve": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "overrides": { "type": "object" }
+  },
+  "$defs": { "projectIdentity": { "type": "object", "additionalProperties": false, "required": ["owner", "ownerType", "number"], "properties": { "owner": { "type": "string", "minLength": 1 }, "ownerType": { "enum": ["user", "organization"] }, "number": { "type": "integer", "minimum": 1 } } } }
+}

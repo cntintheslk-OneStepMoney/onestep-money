@@ -1,0 +1,30 @@
+name: Release umbrella
+description: Define locked release scope and dependency rollup.
+title: "[Roadmap][Umbrella] "
+labels: []
+body:
+  - type: input
+    id: release
+    attributes: { label: Release version, placeholder: v0.2.0 }
+    validations: { required: true }
+  - type: textarea
+    id: objective
+    attributes: { label: Release objective and locked scope, description: Outcome, included child Issues and explicit exclusions. }
+    validations: { required: true }
+  - type: textarea
+    id: dependencies
+    attributes: { label: Dependency order and integration work, description: Child graph and release-integration Issue. }
+    validations: { required: true }
+  - type: textarea
+    id: gates
+    attributes: { label: Release gates and rollback, description: Verification, security, migration, packaging, publication and rollback expectations. }
+    validations: { required: true }
+  - type: checkboxes
+    id: branchless
+    attributes:
+      label: Umbrella semantics
+      options:
+        - label: This umbrella is branchless; executable changes use child/integration Issues.
+          required: true
+        - label: This umbrella must remain pre-Done (normally Review once release review begins) until the relevant release is actually promoted/pushed/deployed to production and that production state is verified.
+          required: true

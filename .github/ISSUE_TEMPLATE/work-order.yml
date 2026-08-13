@@ -1,0 +1,57 @@
+name: Work order
+description: Create an executable implementation contract.
+title: "[Work] "
+labels: []
+body:
+  - type: textarea
+    id: objective
+    attributes: { label: Objective, description: Required outcome and why it matters. }
+    validations: { required: true }
+  - type: input
+    id: release
+    attributes: { label: Target Release, placeholder: v0.2.0 or Unassigned with reason }
+    validations: { required: true }
+  - type: dropdown
+    id: type
+    attributes: { label: Type, options: [Feature, Bug, UI/UX, Security, QOL, Maintenance, Documentation, Infrastructure, Umbrella, Design, Research] }
+    validations: { required: true }
+  - type: dropdown
+    id: priority
+    attributes: { label: Priority, options: [Critical, High, Medium, Low] }
+    validations: { required: true }
+  - type: dropdown
+    id: complexity
+    attributes: { label: Complexity, options: [Small, Medium, Large] }
+    validations: { required: true }
+  - type: input
+    id: area
+    attributes: { label: Area, description: Must match the repository adapter taxonomy. }
+    validations: { required: true }
+  - type: textarea
+    id: dependencies
+    attributes: { label: Dependencies and blockers, placeholder: "Depends on #X; blocks #Y; or None" }
+    validations: { required: true }
+  - type: textarea
+    id: scope
+    attributes: { label: Scope, description: Complete in-scope behavior and boundaries. }
+    validations: { required: true }
+  - type: textarea
+    id: exclusions
+    attributes: { label: Exclusions, description: Explicitly excluded work. }
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes: { label: Acceptance criteria, description: Testable completion conditions. }
+    validations: { required: true }
+  - type: textarea
+    id: verification
+    attributes: { label: Required verification, description: Tests, security, platform, packaging and manual gates. }
+    validations: { required: true }
+  - type: textarea
+    id: safety
+    attributes: { label: Migration, privacy, security and rollback, description: State None only after considering each area. }
+    validations: { required: true }
+  - type: input
+    id: branch
+    attributes: { label: Planned branch, placeholder: feature/concise-description }
+    validations: { required: true }

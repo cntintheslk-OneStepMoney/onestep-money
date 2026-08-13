@@ -1,0 +1,32 @@
+{
+  "standardsVersion": "0.2.0",
+  "managed": [
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/ISSUE_TEMPLATE/bug.yml",
+    ".github/ISSUE_TEMPLATE/work-order.yml",
+    ".github/ISSUE_TEMPLATE/design-brief.yml",
+    ".github/ISSUE_TEMPLATE/future-design-brief.yml",
+    ".github/ISSUE_TEMPLATE/release-umbrella.yml",
+    ".github/ISSUE_TEMPLATE/release-integration.yml",
+    ".github/workflows/policy-ci.yml",
+    ".github/workflows/project-sync.yml",
+    ".github/workflows/reusable-policy-ci.yml",
+    ".github/workflows/reusable-project-sync.yml",
+    ".github/workflows/reusable-security-gate.yml",
+    ".github/workflows/security-gate.yml",
+    "inheritance/manifest.json",
+    "schemas/repository-adapter.schema.json",
+    "scripts/policy-ci.mjs",
+    "scripts/project-sync.mjs",
+    "scripts/security-gate.mjs",
+    "scripts/sync-inheritance.mjs",
+    "scripts/validate-adapter.mjs",
+    "SECURITY.md"
+  ],
+  "preserved": [
+    ".development-operations.yml",
+    "docs/product-policy.md",
+    "README.md",
+    "CHANGELOG.md"
+  ]
+}

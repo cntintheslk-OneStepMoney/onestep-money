@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible defect for triage.
+title: "[Report][Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes: { value: "Reports are triaged before becoming executable Work. Do not include secrets or private data." }
+  - type: textarea
+    id: objective
+    attributes: { label: Objective, description: What correct outcome is required? }
+    validations: { required: true }
+  - type: textarea
+    id: reproduction
+    attributes: { label: Reproduction and evidence, description: Minimal safe steps, expected result, actual result, environment and evidence. }
+    validations: { required: true }
+  - type: textarea
+    id: impact
+    attributes: { label: Impact and safety, description: Severity, affected users/data, security/privacy/migration concerns and safe workaround. }
+    validations: { required: true }
+  - type: dropdown
+    id: priority
+    attributes: { label: Suggested priority, options: [Critical, High, Medium, Low] }
+    validations: { required: true }
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Data hygiene
+      options:
+        - label: I removed credentials, private diagnostics, and realistic personal data.
+          required: true
