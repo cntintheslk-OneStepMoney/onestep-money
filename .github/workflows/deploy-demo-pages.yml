@@ -2,7 +2,7 @@ name: Deploy browser demo to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [production]
     paths:
       - '.github/workflows/deploy-demo-pages.yml'
       - 'demo/**'

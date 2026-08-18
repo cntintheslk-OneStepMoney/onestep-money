@@ -2,10 +2,10 @@ name: Test and release
 
 on:
   push:
-    branches: [main]
+    branches: [development, production]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [development, production]
 
 permissions:
   contents: read

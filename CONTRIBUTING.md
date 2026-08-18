@@ -29,10 +29,19 @@ Keep the interface ADHD-friendly: one primary action, short labels, visible stat
 
 OneStep Money uses a consistent Git and GitHub scheme so release history remains easy to audit.
 
+### Branch model
+
+- `development` is the integration branch for normal implementation work.
+- `production` is the release/live branch and is not a normal implementation target.
+- Start normal work from the current `development` branch on a descriptive non-protected branch.
+- Normal implementation pull requests target `development` and remain draft until implementation and verification are ready for review.
+- Promotion to `production` is performed only through a deliberate release/promotion pull request from `development` after accepted work is integrated and verified.
+- The workflow never merges a pull request on the user's behalf.
+
 ### Git safety
 
-- Never commit, push, merge or otherwise write directly to `main`.
-- Start work from the current `main` on a descriptive non-main branch.
+- Never commit, push or otherwise write normal implementation changes directly to `development` or `production`.
+- Before code work, fetch `origin`, update the view of `development`, and create the work branch from `origin/development`.
 - Never rewrite shared history, force-push, delete remote branches or merge a PR without explicit approval.
 - Keep commits focused and avoid unrelated edits.
 
@@ -43,7 +52,7 @@ Use a descriptive branch with no normal release/version number in the branch nam
 - `feature/financial-reminders`
 - `fix/browser-demo-startup`
 - `ui/dashboard-visualisation`
-- `chore/repository-conventions`
+- `maintenance/repository-conventions`
 
 ### Commit titles
 
@@ -112,16 +121,16 @@ Every implementation PR must contain these sections:
 7. Data and migration impact
 8. Known limitations
 9. Excluded work
-10. Branch details — Branch, Commit SHA, Pull request, Target branch `main`
+10. Branch details — Branch, Commit SHA, Pull request, Target branch (`development` for normal work; `production` only for deliberate promotion)
 11. Confirmations
 
-The Confirmations section must state that nothing was committed/pushed directly to `main`, the workflow did not merge the PR, no personal financial data/documents/credentials/secrets/sensitive logs were committed, and only relevant files changed.
+The Confirmations section must state that nothing was committed/pushed directly to `development` or `production`, the workflow did not merge the PR, no personal financial data/documents/credentials/secrets/sensitive logs were committed, and only relevant files changed.
 
 ### Merge naming
 
 Published history is immutable. Do not rewrite older commit names just to make them match the current convention.
 
-For future merges, preserve the approved PR title as the merge commit title when the GitHub merge UI permits an override, and use the PR summary/body as the merge message. This keeps the top-level `main` history aligned with the same `[Release][Type]` scheme while retaining branch history.
+For future merges, preserve the approved PR title as the merge commit title when the GitHub merge UI permits an override, and use the PR summary/body as the merge message. This keeps protected-branch history aligned with the same `[Release][Type]` scheme while retaining branch history.
 
 ### Historical note
 
