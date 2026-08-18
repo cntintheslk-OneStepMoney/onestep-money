@@ -9,11 +9,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cntintheslk-OneStepMoney/onestep-money.git"
+    "url": "https://github.com/Blackline-Development-DevOps/onestep-money.git"
   },
-  "homepage": "https://github.com/cntintheslk-OneStepMoney/onestep-money#readme",
+  "homepage": "https://github.com/Blackline-Development-DevOps/onestep-money#readme",
   "bugs": {
-    "url": "https://github.com/cntintheslk-OneStepMoney/onestep-money/issues"
+    "url": "https://github.com/Blackline-Development-DevOps/onestep-money/issues"
   },
   "scripts": {
     "test": "node --test tests/*.test.js",

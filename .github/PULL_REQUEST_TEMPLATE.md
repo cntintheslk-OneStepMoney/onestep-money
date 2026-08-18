@@ -31,10 +31,10 @@
 - **Branch:**
 - **Commit SHA:**
 - **Pull request:**
-- **Target branch:** `main`
+- **Target branch:** `development` for normal work; `production` only for deliberate release promotion
 
 ## Confirmations
-- [ ] No changes were committed or pushed directly to `main`.
+- [ ] No changes were committed or pushed directly to `development` or `production`.
 - [ ] This PR has not been merged by this workflow.
 - [ ] No personal financial data, imported documents, credentials, secrets, sensitive logs or encryption material were committed.
 - [ ] Only files relevant to this work were changed.
