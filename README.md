@@ -115,9 +115,9 @@ The demo does not accept real financial documents, create a OneStep account, sto
 
 ### Public GitHub Pages deployment
 
-The public demo is designed to run at [https://cntintheslk-onestepmoney.github.io/onestep-money/](https://cntintheslk-onestepmoney.github.io/onestep-money/).
+The public demo is designed to run at [https://blackline-development-devops.github.io/onestep-money/](https://blackline-development-devops.github.io/onestep-money/).
 
-After the Pages deployment PR is merged, open **Repository Settings → Pages** and set **Source** to **GitHub Actions**. The `Deploy browser demo to GitHub Pages` workflow then deploys relevant changes from `main` automatically and can also be started manually from the Actions tab.
+After the Pages deployment PR is merged, open **Repository Settings → Pages** and set **Source** to **GitHub Actions**. The `Deploy browser demo to GitHub Pages` workflow then deploys relevant changes from `production` automatically and can also be started manually from the Actions tab.
 
 The workflow builds an explicit public allowlist with `npm run build:pages`. It does not publish the Electron application, private storage/import code, tests, packaging output, documents, credentials or financial data. No Jekyll template, second repository, external host or backend is required.
 

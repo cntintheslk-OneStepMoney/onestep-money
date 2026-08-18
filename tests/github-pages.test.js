@@ -33,9 +33,9 @@ test('Pages entry point uses project-relative resources that resolve in the arti
   assert.doesNotMatch(html, /https?:\/\//);
 });
 
-test('Pages workflow deploys the allowlisted artifact from main and supports manual runs', async () => {
+test('Pages workflow deploys the allowlisted artifact from production and supports manual runs', async () => {
   const workflow = (await fs.readFile(path.join(root, '.github/workflows/deploy-demo-pages.yml'), 'utf8')).replaceAll('\r\n', '\n');
-  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /branches: \[production\]/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /permissions:\n  contents: read\n  pages: write\n  id-token: write/);
   assert.match(workflow, /npm run build:pages/);
