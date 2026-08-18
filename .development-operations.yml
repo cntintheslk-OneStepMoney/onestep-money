@@ -3,12 +3,12 @@
   "standardsVersion": "0.2.0",
   "project": {
     "displayName": "OneStep Money Development",
-    "repository": "cntintheslk-OneStepMoney/onestep-money",
-    "owner": "cntintheslk-OneStepMoney",
+    "repository": "Blackline-Development-DevOps/onestep-money",
+    "owner": "Blackline-Development-DevOps",
     "ownerType": "user",
     "number": 4,
     "centralPortfolio": {
-      "owner": "cntintheslk-OneStepMoney",
+      "owner": "Blackline-Development-DevOps",
       "ownerType": "user",
       "number": 5
     }
@@ -88,9 +88,9 @@
   },
   "overrides": {
     "branchMigration": {
-      "currentIntegrationBranch": "main",
-      "currentProductionEquivalent": "main",
-      "state": "legacy-main-preserved-until-deliberate-migration",
+      "currentIntegrationBranch": "development",
+      "currentProductionEquivalent": "production",
+      "state": "development-production-established",
       "directPushAllowed": false,
       "draftPullRequestsRequired": true
     },
