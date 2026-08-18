@@ -115,7 +115,7 @@ The demo does not accept real financial documents, create a OneStep account, sto
 
 ### Public GitHub Pages deployment
 
-The public demo is designed to run at [https://cntintheslk-onestepmoney.github.io/onestep-money/](https://cntintheslk-onestepmoney.github.io/onestep-money/).
+The public demo is designed to run at [https://blackline-development-devops.github.io/onestep-money/](https://blackline-development-devops.github.io/onestep-money/).
 
 After the Pages deployment PR is merged, open **Repository Settings → Pages** and set **Source** to **GitHub Actions**. The `Deploy browser demo to GitHub Pages` workflow then deploys relevant changes from `main` automatically and can also be started manually from the Actions tab.
 
