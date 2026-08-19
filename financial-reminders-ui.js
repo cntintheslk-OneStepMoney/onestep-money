@@ -4,6 +4,7 @@ import {
 } from './financial-reminders.js';
 
 let state = null;
+let saving = false;
 
 export function renderFinancialRemindersPanel(nextState) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -121,11 +122,25 @@ function currentSource(card) {
 }
 
 async function persist(next, message) {
+  if (saving) {
+    setStatus('That reminder change is already being saved.');
+    return false;
+  }
+  saving = true;
   try {
     const saved = await window.financeAPI.saveState(next);
     if (saved?.status === 'blocked' || saved?.status === 'conflict') throw new Error(saved.message || 'The reminder could not be saved safely.');
-    state = saved; setStatus(message); window.setTimeout(() => window.location.reload(), 120);
-  } catch (error) { setStatus(error?.message || 'The reminder could not be saved.'); }
+    state = saved;
+    const panel = document.getElementById('financialRemindersSettings');
+    if (panel) render(panel);
+    setStatus(message);
+    return true;
+  } catch (error) {
+    setStatus(error?.message || 'The reminder could not be saved.');
+    return false;
+  } finally {
+    saving = false;
+  }
 }
 
 function sourceLabel(source) {
