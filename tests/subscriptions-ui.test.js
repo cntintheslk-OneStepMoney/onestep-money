@@ -3,13 +3,15 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 
 test('Subscriptions UI is packaged, first-class, accessible and local-only', async () => {
-  const [ui, css, presentation, pkg] = await Promise.all([
+  const [ui, css, desktopUi, presentation, pkg] = await Promise.all([
     fs.readFile(new URL('../subscriptions-ui.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../subscriptions.css', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../update-ui.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../presentation-settings.js', import.meta.url), 'utf8'),
     fs.readFile(new URL('../package.json', import.meta.url), 'utf8').then(JSON.parse)
   ]);
-  assert.match(presentation, /import '\.\/subscriptions-ui\.js';/);
+  assert.match(desktopUi, /import '\.\/subscriptions-ui\.js';/);
+  assert.doesNotMatch(presentation, /subscriptions-ui/);
   assert.match(ui, /className = 'subscriptions-nav-button'/);
   assert.match(ui, /dataset\.view = 'subscriptions'/);
   assert.match(ui, /draggable = true/);
