@@ -52,9 +52,9 @@ jobs:
           test "$(git diff --name-only origin/development | sort | tr '\n' ' ')" = "CHANGELOG.md package-lock.json package.json "
           git diff origin/development -- package-lock.json > /tmp/lock.patch
           cat /tmp/lock.patch
-          test "$(grep -c '^[-+]  \"version\": \"2\.3\.[01]\",' /tmp/lock.patch)" -eq 2
-          test "$(grep -c '^[-+]      \"version\": \"2\.3\.[01]\",' /tmp/lock.patch)" -eq 2
-          test "$(grep -E '^[+-]' /tmp/lock.patch | grep -Ev '^(---|\+\+\+|[-+]  \"version\": \"2\.3\.[01]\",|[-+]      \"version\": \"2\.3\.[01]\",)$' | wc -l)" -eq 0
+          test "$(git diff --numstat origin/development -- package-lock.json)" = $'2\t2\tpackage-lock.json'
+          test "$(grep -E '^[+-][^+-]' /tmp/lock.patch | wc -l)" -eq 4
+          test "$(grep -E '^[+-][^+-]' /tmp/lock.patch | grep -Ev '^[-+](  |      )\"version\": \"2\.3\.[01]\",$' | wc -l)" -eq 0
           node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!=='2.3.1'||l.version!=='2.3.1'||l.packages[''].version!=='2.3.1') process.exit(1)"
       - name: Commit clean release metadata
         shell: bash
