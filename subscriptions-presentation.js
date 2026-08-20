@@ -5,6 +5,7 @@ import {
   normaliseRecurringCost
 } from './subscription-model.js';
 import { buildSubscriptionSavingsRecommendation } from './subscription-savings.js';
+import { readSubscriptionWorkflow, subscriptionRecommendationOptions } from './subscription-workflow.js';
 
 export const SUBSCRIPTION_FILTER = Object.freeze({
   ALL: 'all', ACTIVE: 'active', REVIEW: 'review', UNRANKED: 'unranked', PROTECTED: 'protected'
@@ -16,18 +17,21 @@ export const SUBSCRIPTION_SORT = Object.freeze({
 export function buildSubscriptionsPresentation(state = {}, options = {}) {
   const model = buildSubscriptionModel(state);
   const accounts = new Map((Array.isArray(state.accounts) ? state.accounts : []).map((account) => [String(account.id || ''), account]));
-  const activeRows = model.active.map((record) => recordRow(record, accounts));
+  const activeRows = model.active.map((record) => recordRow(record, accounts, readSubscriptionWorkflow(state, record.id)));
   const candidateRows = model.candidates.map((candidate) => candidateRow(candidate, accounts));
   const rows = filterAndSortSubscriptionRows([...activeRows, ...candidateRows], options);
-  const recommendation = buildSubscriptionSavingsRecommendation(state, options.savingsOptions || {});
+  const recommendation = buildSubscriptionSavingsRecommendation(state, {
+    ...subscriptionRecommendationOptions(state),
+    ...(options.savingsOptions || {})
+  });
   return {
     rows,
     activeRows: filterAndSortSubscriptionRows(activeRows, options),
     candidateRows: filterAndSortSubscriptionRows(candidateRows, options),
     recommendation,
     summary: {
-      activeCount: activeRows.length,
-      reviewCount: candidateRows.length,
+      activeCount: activeRows.filter((row) => row.lifecycleStatus === 'active').length,
+      reviewCount: candidateRows.length + activeRows.filter((row) => row.lifecycleStatus === 'review').length,
       monthly: aggregateCost(activeRows.map((row) => row.cost?.monthly).filter(Boolean)),
       annual: aggregateCost(activeRows.map((row) => row.cost?.annual).filter(Boolean)),
       potentialSavings: recommendation.monthlyTarget > 0 ? recommendation.monthly : null
@@ -48,7 +52,7 @@ export function filterAndSortSubscriptionRows(rows = [], options = {}) {
   return [...filtered].sort(rowComparator(sort));
 }
 
-function recordRow(record, accounts) {
+function recordRow(record, accounts, workflow) {
   const cost = normaliseRecurringCost(record.amountRange, record.cadence);
   return {
     id: record.id,
@@ -63,7 +67,10 @@ function recordRow(record, accounts) {
     expectedNextPayment: record.expectedNextPayment,
     classification: record.classification,
     statusLabel: record.classification === SUBSCRIPTION_CLASSIFICATION.MANUAL ? 'Manual' : 'Confirmed by you',
-    lifecycleStatus: record.lifecycleStatus || 'active',
+    lifecycleStatus: workflow.lifecycleStatus,
+    cancellationEffectiveDate: workflow.cancellationEffectiveDate,
+    contractEndDate: workflow.contractEndDate,
+    contractReviewRequired: workflow.contractReviewRequired,
     rank: Number.isInteger(record.rank) && record.rank > 0 ? record.rank : null,
     protectionState: record.protectionState || SUBSCRIPTION_PROTECTION.NONE,
     notes: record.notes || '',
@@ -91,6 +98,9 @@ function candidateRow(candidate, accounts) {
     classification: candidate.classification,
     statusLabel: candidateStatusLabel(candidate.classification),
     lifecycleStatus: 'review',
+    cancellationEffectiveDate: null,
+    contractEndDate: null,
+    contractReviewRequired: false,
     rank: null,
     protectionState: SUBSCRIPTION_PROTECTION.NONE,
     notes: '',
