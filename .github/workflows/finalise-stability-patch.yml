@@ -1,0 +1,88 @@
+name: Finalise v2.3.1 release metadata
+
+on:
+  push:
+    branches:
+      - release/stability-patch
+    paths:
+      - .github/workflows/finalise-stability-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/stability-patch
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Generate v2.3.1 package metadata
+        run: npm version 2.3.1 --no-git-tag-version
+
+      - name: Prepend consolidated changelog
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('CHANGELOG.md')
+          text = path.read_text(encoding='utf-8')
+          heading = '## 2.3.1 — Immediate Correctness and Governance Repair'
+          if heading not in text:
+              marker = '## 2.3.0 — Subscriptions'
+              section = '''## 2.3.1 — Immediate Correctness and Governance Repair
+
+### Bug
+- Prevented materially changed recurring subscription evidence from leaving both historical and replacement records active in current counts, totals, ranking or savings recommendations (#168).
+- Corrected Money In so trusted external incoming transactions remain primary evidence while a valid unmatched dated payslip can supply missing salary income without double counting a matching bank credit (#30).
+- Restored the subscription CSV export control to the real Subscriptions header and kept it available after ordinary rerenders without duplicate controls (#169).
+- Corrected Project Sync parsing for the canonical numbered metadata format used by current Roadmap and Work Issues (#173).
+- Paginated full Project Sync Issue and branch reconciliation so scheduled/manual reconciliation no longer silently stops at the first REST page (#174).
+
+### QOL
+- Subscription CSV export remains explicitly user initiated, local-only and resilient to save-dialog cancellation or failure.
+- Existing subscription history remains preserved while current calculations use only the authoritative current confirmed generation for valid supersession chains.
+
+### Maintenance
+- Added focused regression coverage for subscription supersession chains, Money In reconciliation, subscription export rerenders, numbered Project metadata and Project Sync pagination.
+- Preserved existing Policy CI, Security Gate, privacy, quality, Electron, Pages and Windows packaging verification boundaries.
+- Updated application package and lockfile metadata for v2.3.1 (#183).
+
+### Data/Migration
+- No stored financial-data schema migration or historical financial-record rewrite is required.
+- Subscription supersession and Money In corrections are derived at read/report time; existing transactions, payslips and subscription history remain intact.
+- Project Sync changes affect repository governance metadata only and do not alter application financial state.
+
+### Known Limitations
+- Malformed or cyclic subscription supersession metadata remains conservatively visible rather than silently discarding ambiguous confirmed records.
+- Payslips without a valid pay date are not inferred into Money In because cross-month assignment would be unsafe.
+- Export remains a local CSV flow; this patch adds no cloud upload, sharing or remote financial storage.
+
+'''
+              if marker not in text:
+                  raise SystemExit('2.3.0 changelog marker not found')
+              text = text.replace(marker, section + marker, 1)
+              path.write_text(text, encoding='utf-8')
+
+      - name: Verify release metadata diff
+        run: |
+          git diff --check
+          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!=='2.3.1'||l.version!=='2.3.1'||l.packages[''].version!=='2.3.1') process.exit(1)"
+          git diff --exit-code -- package.json package-lock.json CHANGELOG.md >/dev/null && exit 1 || true
+          test -z "$(git diff --name-only | grep -Ev '^(package.json|package-lock.json|CHANGELOG.md)$')"
+
+      - name: Commit release metadata
+        run: |
+          git config user.name 'Dev Ops'
+          git config user.email '104691209+Blackline-Development-DevOps@users.noreply.github.com'
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m '[v2.3.1][Maintenance] Finalise patch release metadata' -m $'Purpose:\nPrepare the exact v2.3.1 release metadata for the integrated correctness and governance patch.\n\nChanges:\nBump package and lockfile metadata to v2.3.1 and add the consolidated changelog covering #168, #30, #169, #173 and #174.\n\nVerification:\nVersion consistency and diff-scope checks passed in the one-shot release finaliser. Full release CI follows on the principal PR.\n\nIssue: #183'
+          git push origin HEAD:release/stability-patch
