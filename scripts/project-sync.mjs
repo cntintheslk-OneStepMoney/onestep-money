@@ -3,20 +3,61 @@ import { pathToFileURL } from 'node:url';
 
 const canonicalFields = ['Project', 'Priority', 'Complexity', 'Title', 'Status', 'Type', 'Target Release', 'Area', 'Branch', 'Start Date', 'Target Date'];
 const lifecycle = ['Idea', 'Backlog', 'Planned', 'In Progress', 'Review', 'Done'];
+const projectTypes = ['Feature', 'Bug', 'UI/UX', 'Security', 'QOL', 'Maintenance'];
+
+function normaliseExtractedValue(value) {
+  if (value === undefined || value === null) return undefined;
+  let cleaned = String(value).trim().replace(/^`|`$/g, '').trim();
+  cleaned = cleaned.replace(/^(?:\*{1,2}|_{1,2})(.+?)(?:\*{1,2}|_{1,2})$/, '$1').trim();
+  if (!cleaned || /^\(?blank\b/i.test(cleaned)) return undefined;
+  return cleaned;
+}
 
 export function extract(body, label) {
+  if (!body) return undefined;
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return body?.match(new RegExp(`(?:^|\\n)(?:#{1,4}\\s*|[-*]\\s*\\*{0,2})${escaped}\\*{0,2}\\s*(?::|\\n)\\s*([^\\n]+)`, 'i'))?.[1]?.trim()?.replace(/^`|`$/g, '');
+  const inline = new RegExp(`^\\s*(?:(?:#{1,4}|[-*]|\\d+[.)])\\s+)?\\*{0,2}${escaped}\\*{0,2}\\s*:\\*{0,2}\\s*(.*)$`, 'i');
+  const heading = new RegExp(`^\\s*#{1,4}\\s+\\*{0,2}${escaped}\\*{0,2}\\s*$`, 'i');
+  const lines = String(body).split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(inline);
+    if (match) return normaliseExtractedValue(match[1]);
+    if (heading.test(lines[index])) return normaliseExtractedValue(lines[index + 1]);
+  }
+  return undefined;
+}
+
+function workTypeFromTitle(title = '') {
+  const match = title.match(/^\[Work\]\[([^\]]+)\]/i);
+  if (!match) return undefined;
+  return projectTypes.find(value => value.toLowerCase() === match[1].toLowerCase());
+}
+
+function isFutureDesignBrief(title = '') {
+  return title.includes('[Design Brief][Future]') || title.includes('[Future Design Brief]');
 }
 
 export function deriveIssueMetadata(issue, facts = {}) {
   const body = issue.body ?? '';
-  const typeFromTitle = issue.title.includes('[Umbrella]') ? 'Umbrella' : (!facts.branch && issue.title.includes('[Design Brief]') ? 'Design' : undefined);
-  const status = facts.merged || issue.state === 'closed' ? 'Done' : facts.reviewReady ? 'Review' : facts.branch ? 'In Progress' : extract(body, 'Status') ?? (issue.title.includes('[Future Design Brief]') ? 'Backlog' : 'Planned');
+  const status = facts.merged || issue.state === 'closed'
+    ? 'Done'
+    : facts.reviewReady
+      ? 'Review'
+      : facts.branch
+        ? 'In Progress'
+        : extract(body, 'Status') ?? (isFutureDesignBrief(issue.title) ? 'Backlog' : 'Planned');
   const metadata = {
-    Project: facts.project, Priority: extract(body, 'Priority'), Complexity: extract(body, 'Complexity'), Status: status,
-    Type: extract(body, 'Type') ?? typeFromTitle, 'Target Release': extract(body, 'Target Release') ?? issue.title.match(/\[v(\d+\.\d+\.\d+)\]/i)?.[1]?.replace(/^/, 'v'),
-    Area: extract(body, 'Area'), Branch: facts.branch, 'Start Date': facts.startDate, 'Target Date': extract(body, 'Target Date')
+    Project: facts.project,
+    Priority: extract(body, 'Priority'),
+    Complexity: extract(body, 'Complexity'),
+    Status: status,
+    Type: extract(body, 'Type') ?? workTypeFromTitle(issue.title),
+    'Target Release': extract(body, 'Target Release') ?? issue.title.match(/\[v(\d+\.\d+\.\d+)\]/i)?.[1]?.replace(/^/, 'v'),
+    Area: extract(body, 'Area'),
+    Branch: facts.branch,
+    'Start Date': facts.startDate,
+    'Target Date': extract(body, 'Target Date')
   };
   return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined && value !== ''));
 }
@@ -28,6 +69,11 @@ export function validateProjectSchema(fields, areas = []) {
   for (const value of lifecycle) if (!statusOptions.includes(value)) errors.push(`missing Status option: ${value}`);
   if (areas.length && !areas.every(area => typeof area === 'string' && area.trim())) errors.push('adapter areas must be non-empty strings');
   return errors;
+}
+
+export function validateIssueMetadata(metadata, areas = []) {
+  if (metadata.Area && !areas.includes(metadata.Area)) throw new Error(`Area not allowed by adapter: ${metadata.Area}`);
+  return metadata;
 }
 
 export function planUpdates(metadata, fields, current = {}) {
@@ -86,8 +132,7 @@ async function syncIssue(client, context, adapter, issue, dryRun) {
   const pr = pulls[0];
   const branch = planned && (pr || branches.some(entry => entry.name === planned)) ? planned : undefined;
   const startDate = pr?.created_at?.slice(0, 10) ?? (branch ? issue.created_at?.slice(0, 10) : undefined);
-  const metadata = deriveIssueMetadata(issue, { project: adapter.project.displayName, branch, startDate, reviewReady: Boolean(pr?.draft === false && !pr?.merged_at), merged: Boolean(pr?.merged_at) });
-  if (metadata.Area && !adapter.areas.includes(metadata.Area)) throw new Error(`Area not allowed by adapter: ${metadata.Area}`);
+  const metadata = validateIssueMetadata(deriveIssueMetadata(issue, { project: adapter.project.displayName, branch, startDate, reviewReady: Boolean(pr?.draft === false && !pr?.merged_at), merged: Boolean(pr?.merged_at) }), adapter.areas);
   const updates = planUpdates(metadata, context.fields);
   if (dryRun) return { issue: issue.number, metadata, updates };
   const itemId = await ensureItem(client, context.id, issue.node_id);
