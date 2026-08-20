@@ -93,16 +93,18 @@ function routeGuidance(type) {
   return 'This stored destination opens the provider’s official general subscription/account-management page.';
 }
 function encodeBase64Url(text) {
-  if (typeof Buffer !== 'undefined') return Buffer.from(text, 'utf8').toString('base64url');
-  const bytes = new TextEncoder().encode(text); let binary = '';
+  const BufferCtor = globalThis.Buffer;
+  if (BufferCtor) return BufferCtor.from(text, 'utf8').toString('base64url');
+  const bytes = new globalThis.TextEncoder().encode(text); let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return globalThis.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 function decodeBase64Url(value) {
-  if (typeof Buffer !== 'undefined') return Buffer.from(value, 'base64url').toString('utf8');
+  const BufferCtor = globalThis.Buffer;
+  if (BufferCtor) return BufferCtor.from(value, 'base64url').toString('utf8');
   const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
-  const binary = atob(base64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  const binary = globalThis.atob(base64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new globalThis.TextDecoder().decode(bytes);
 }
 function isPrivateIpLiteral(host) {
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
