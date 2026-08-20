@@ -279,7 +279,7 @@ function storageEnvelope(record) {
     recordKind: STORAGE_KIND,
     active: false,
     includedInBudget: true,
-    status: 'metadata',
+    status: 'resolved',
     amount: 0,
     outgoing: 0,
     payment: 0,
