@@ -142,14 +142,15 @@ test('global automation pause preserves unresolved Review work', () => {
   assert.equal(activeReviewItems(state).some((entry) => entry.id === item.id), true);
 });
 
-test('recurring confirmation routes to the detected pattern and source confirmation resolves it', () => {
+test('incoming recurring confirmation remains an Automation Review path and source confirmation resolves it', () => {
   let state = baseState();
   state.transactions = [
-    transaction({ id: 'recurring-1', date: '2026-06-10' }),
-    transaction({ id: 'recurring-2', date: '2026-07-10' })
+    transaction({ id: 'recurring-1', date: '2026-06-10', incoming: 42, outgoing: 0, budgetCategoryId: '', category: 'Income' }),
+    transaction({ id: 'recurring-2', date: '2026-07-10', incoming: 42, outgoing: 0, budgetCategoryId: '', category: 'Income' })
   ];
   const pattern = deriveRecurringPatterns(state)[0];
   assert.ok(pattern);
+  assert.equal(pattern.direction, 'incoming');
   synchroniseReviewItems(state, NOW);
   const item = activeReviewItems(state, NOW).find((entry) => entry.type === AUTOMATION_REVIEW_TYPE.RECURRING_CONFIRMATION);
   assert.ok(item);

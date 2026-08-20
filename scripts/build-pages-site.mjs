@@ -30,6 +30,8 @@ export const PAGE_FILES = Object.freeze([
   ['recurring-finance-ui.js', 'recurring-finance-ui.js'],
   ['review-lifecycle-base.js', 'review-lifecycle-base.js'],
   ['review-lifecycle.js', 'review-lifecycle.js'],
+  ['subscription-model.js', 'subscription-model.js'],
+  ['subscription-workflow.js', 'subscription-workflow.js'],
   ['transaction-categorisation.js', 'transaction-categorisation.js'],
   ['unified-financial-profile.js', 'unified-financial-profile.js']
 ]);

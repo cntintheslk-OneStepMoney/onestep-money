@@ -108,6 +108,8 @@
       "subscription-cancellation-ui.js",
       "subscription-savings.js",
       "subscription-savings-ui.js",
+      "subscription-workflow.js",
+      "subscription-workflow-ui.js",
       "subscriptions-presentation.js",
       "subscriptions-ui.js",
       "subscriptions.css",

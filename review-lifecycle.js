@@ -4,6 +4,11 @@ import {
   AUTOMATION_REVIEW_TYPE, automationReviewPresentation, automationReviewRoute,
   automationReviewSourceActive, automationReviewSources
 } from './automation-review-integration.js';
+import { deriveSubscriptionCandidates } from './subscription-model.js';
+import {
+  SUBSCRIPTION_REVIEW_TYPE, subscriptionReviewPresentation, subscriptionReviewRoute,
+  subscriptionReviewSourceActive, subscriptionReviewSources
+} from './subscription-workflow.js';
 import {
   ensurePaydayConfiguration, missingIncomePresentation, missingIncomeReviewSources, nextDependablePayday
 } from './payday-awareness.js';
@@ -12,7 +17,11 @@ export const REVIEW_STATUS = base.REVIEW_STATUS;
 export const REVIEW_DIAGNOSTIC_CODES = base.REVIEW_DIAGNOSTIC_CODES;
 export const knownPaydayDay = base.knownPaydayDay;
 
-const SUPPLEMENTAL_REVIEW_TYPES = new Set(['missing_income', ...Object.values(AUTOMATION_REVIEW_TYPE)]);
+const SUPPLEMENTAL_REVIEW_TYPES = new Set([
+  'missing_income',
+  ...Object.values(AUTOMATION_REVIEW_TYPE),
+  ...Object.values(SUBSCRIPTION_REVIEW_TYPE)
+]);
 
 export function synchroniseReviewItems(state, now = new Date()) {
   synchroniseFinancialReminders(state, now);
@@ -23,9 +32,18 @@ export function synchroniseReviewItems(state, now = new Date()) {
   state.reviewItems = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
     .filter((item) => !supplementalReviewType(item?.type));
   base.synchroniseReviewItems(state, now);
+
+  const subscriptionSources = subscriptionReviewSources(state, now);
+  const subscriptionPatternIds = new Set(deriveSubscriptionCandidates(state).map((candidate) => String(candidate.sourcePatternId || '')).filter(Boolean));
+  const automationSources = automationReviewSources(state, now).filter((source) => !(
+    source.type === AUTOMATION_REVIEW_TYPE.RECURRING_CONFIRMATION
+    && source.sourceType === 'recurring_pattern'
+    && subscriptionPatternIds.has(String(source.sourceId))
+  ));
   mergeSupplementalItems(state, previousSupplemental, [
     ...missingIncomeReviewSources(state, now),
-    ...automationReviewSources(state, now)
+    ...automationSources,
+    ...subscriptionSources
   ], now);
   return state;
 }
@@ -60,6 +78,7 @@ export function groupReviewItems(items, state, now = new Date()) {
   return base.groupReviewItems(items, state).map((group) => {
     if (group.type === 'missing_income') return { ...group, presentation: missingPresentation(state, group.items[0], now) };
     if (automationReviewType(group.type)) return { ...group, presentation: automationReviewPresentation(state, group.items[0]) };
+    if (subscriptionReviewType(group.type)) return { ...group, presentation: subscriptionReviewPresentation(state, group.items[0]) };
     return group;
   });
 }
@@ -67,6 +86,7 @@ export function groupReviewItems(items, state, now = new Date()) {
 export function reviewItemPresentation(item, state, now = new Date()) {
   if (item?.type === 'missing_income') return missingPresentation(state, item, now);
   if (automationReviewType(item?.type)) return automationReviewPresentation(state, item);
+  if (subscriptionReviewType(item?.type)) return subscriptionReviewPresentation(state, item);
   return base.reviewItemPresentation(item, state);
 }
 
@@ -148,6 +168,7 @@ export function selectCheckInReviewItems(state, now = new Date(), limit = 4) {
 export function reviewRoute(item, state = {}) {
   if (item?.type === 'missing_income') return { view: 'settings', type: 'income_schedule', id: item.sourceId };
   if (automationReviewType(item?.type)) return automationReviewRoute(state, item);
+  if (subscriptionReviewType(item?.type)) return subscriptionReviewRoute(state, item);
   return base.reviewRoute(item, state);
 }
 
@@ -224,6 +245,7 @@ function supplementalSourceActive(state, item, now) {
   if (item?.type === 'missing_income') {
     return missingIncomeReviewSources(state, now).some((source) => source.sourceId === item.sourceId);
   }
+  if (subscriptionReviewType(item?.type)) return subscriptionReviewSourceActive(state, item, now);
   return automationReviewSourceActive(state, item, now);
 }
 
@@ -286,6 +308,7 @@ function requireOpenItem(state, itemId) {
 
 function supplementalReviewType(value) { return SUPPLEMENTAL_REVIEW_TYPES.has(value); }
 function automationReviewType(value) { return Object.values(AUTOMATION_REVIEW_TYPE).includes(value); }
+function subscriptionReviewType(value) { return Object.values(SUBSCRIPTION_REVIEW_TYPE).includes(value); }
 function reviewItemId(type, sourceType, sourceId) { return `review:${safeToken(type, 60)}:${safeToken(sourceType, 40)}:${hashId(String(sourceId))}`; }
 function hashId(value) { let hash = 2166136261; for (const character of value) { hash ^= character.charCodeAt(0); hash = Math.imul(hash, 16777619); } return `${(hash >>> 0).toString(36)}-${value.length}`; }
 function safeToken(value, length) { return String(value || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, length); }
