@@ -8,66 +8,10 @@ on:
     branches: [development, production]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  repair-stability-patch:
-    if: github.event_name == 'pull_request' && github.head_ref == 'release/stability-patch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout release branch
-        uses: actions/checkout@v4
-        with:
-          ref: release/stability-patch
-          fetch-depth: 0
-      - name: Restore exact development lock metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin development
-          git show origin/development:package-lock.json > package-lock.json
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('package-lock.json')
-          text = path.read_text(encoding='utf-8')
-          first = '  "version": "2.3.0",'
-          second = '      "version": "2.3.0",'
-          if text.count(first) < 1 or text.count(second) < 1:
-              raise SystemExit('Expected v2.3.0 root lockfile version markers were not found')
-          text = text.replace(first, '  "version": "2.3.1",', 1)
-          text = text.replace(second, '      "version": "2.3.1",', 1)
-          path.write_text(text, encoding='utf-8')
-          PY
-      - name: Remove temporary tooling and restore workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm -f .github/workflows/finalise-stability-patch.yml
-          git checkout origin/development -- .github/workflows/release.yml
-      - name: Verify exact final release diff
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --check origin/development
-          test "$(git diff --name-only origin/development | sort | tr '\n' ' ')" = "CHANGELOG.md package-lock.json package.json "
-          git diff origin/development -- package-lock.json > /tmp/lock.patch
-          cat /tmp/lock.patch
-          test "$(git diff --numstat origin/development -- package-lock.json)" = $'2\t2\tpackage-lock.json'
-          test "$(grep -E '^[+-][^+-]' /tmp/lock.patch | wc -l)" -eq 4
-          test "$(grep -E '^[+-][^+-]' /tmp/lock.patch | grep -Ev '^[-+](  |      )\"version\": \"2\.3\.[01]\",$' | wc -l)" -eq 0
-          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!=='2.3.1'||l.version!=='2.3.1'||l.packages[''].version!=='2.3.1') process.exit(1)"
-      - name: Commit clean release metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'Blackline Development Operations'
-          git config user.email '104691209+Blackline-Development-DevOps@users.noreply.github.com'
-          git add CHANGELOG.md package.json package-lock.json .github/workflows/release.yml
-          git commit -m '[v2.3.1][Maintenance] Restore clean release candidate' -m $'Purpose:\nRestore the v2.3.1 release candidate to the exact verified development dependency metadata.\n\nChanges:\nRestore package-lock.json from development, change only its two root version fields to v2.3.1, remove temporary release-finaliser tooling, and restore the normal release workflow.\n\nVerification:\nFinal diff is exactly CHANGELOG.md, package.json and package-lock.json; lockfile differs from development only in the two root version fields. Full release CI follows on this clean head.\n\nIssue: #183'
-          git push origin HEAD:release/stability-patch
-
   test:
-    if: github.head_ref != 'release/stability-patch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +40,7 @@ jobs:
       - run: npm run benchmark:quality
 
   test-windows:
-    if: github.event_name == 'pull_request' && github.head_ref != 'release/stability-patch'
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
