@@ -1,6 +1,6 @@
 import {
-  ALL_TIME_PERIOD, availableReportingMonths, calculateBudgetAnalysis, calculatePeriodSummary,
-  formatCurrency, isExternalCashflowTransaction, periodTransactions
+  ALL_TIME_PERIOD, availableReportingMonths, calculateBudgetAnalysis, calculatePeriodIncome, calculatePeriodSummary,
+  formatCurrency, periodTransactions
 } from './finance-core.js';
 import { confirmedRecurringTransactionIds, deriveRecurringPatterns } from './recurring-finance.js';
 import { renderRecurringActivityPanel } from './recurring-finance-ui.js';
@@ -71,10 +71,9 @@ function spendingTimeline(state, period, budget, monthlyTimeline) {
 function incomeTimeline(state, period, monthlyTimeline) {
   if (period === ALL_TIME_PERIOD) return monthlyTimeline.map((row) => ({ label: row.month, amount: row.income, incomplete: row.incomplete }));
   const amounts = new Map();
-  for (const transaction of periodTransactions(state.transactions, period).filter(isExternalCashflowTransaction)) {
-    const date = String(transaction.date || '').slice(0, 10);
-    if (!date || Number(transaction.incoming || 0) <= 0) continue;
-    amounts.set(date, roundMoney((amounts.get(date) || 0) + Number(transaction.incoming || 0)));
+  for (const entry of calculatePeriodIncome(state, period).entries) {
+    if (!entry.date || Number(entry.amount || 0) <= 0) continue;
+    amounts.set(entry.date, roundMoney((amounts.get(entry.date) || 0) + Number(entry.amount || 0)));
   }
   return [...amounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([label, amount]) => ({ label, amount, incomplete: false }));
 }
