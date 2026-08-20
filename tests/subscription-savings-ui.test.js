@@ -11,7 +11,7 @@ test('subscription savings UI exposes a local target and conservative advice-onl
   assert.match(ui, /Remaining gap/);
   assert.match(ui, /Advice only/);
   assert.match(ui, /does not cancel subscriptions or move money/i);
-  assert.match(ui, /Keep, Essential and Excluded choices stay authoritative/);
+  assert.match(ui, /Keep, Essential, Excluded and lifecycle review choices stay authoritative/);
   assert.doesNotMatch(ui, /openCancellationDestination|location\.reload|fetch\(|XMLHttpRequest|WebSocket|sendBeacon/);
 });
 
