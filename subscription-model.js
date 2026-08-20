@@ -45,8 +45,10 @@ export function listSubscriptionRecords(state = {}) {
 }
 
 export function activeSubscriptionRecords(state = {}) {
-  return listSubscriptionRecords(state).filter((record) => (
-    record.decisionState === SUBSCRIPTION_DECISION.CONFIRMED
+  const records = listSubscriptionRecords(state);
+  const currentIds = currentConfirmedSubscriptionIds(records);
+  return records.filter((record) => (
+    currentIds.has(record.id)
     && record.visibility === SUBSCRIPTION_VISIBILITY.ACTIVE
   ));
 }
@@ -379,6 +381,45 @@ function normaliseSubscriptionRecord(value) {
     rejectedAt: validIsoDate(value.rejectedAt) ? value.rejectedAt : null,
     hiddenAt: validIsoDate(value.hiddenAt) ? value.hiddenAt : null
   };
+}
+
+function currentConfirmedSubscriptionIds(records) {
+  const confirmed = records.filter((record) => record.decisionState === SUBSCRIPTION_DECISION.CONFIRMED);
+  const byId = new Map(confirmed.map((record) => [record.id, record]));
+  const superseded = new Set();
+
+  for (const replacement of confirmed) {
+    if (replacement.source !== SUBSCRIPTION_SOURCE.RECURRING) continue;
+    const previousId = replacement.supersedesRecordId;
+    const previous = byId.get(previousId);
+    if (!previous || previous.id === replacement.id) continue;
+    if (previous.source !== SUBSCRIPTION_SOURCE.RECURRING) continue;
+    if (!replacement.sourcePatternId || replacement.sourcePatternId !== previous.sourcePatternId) continue;
+    if (supersessionChainHasCycle(replacement.id, byId)) continue;
+    superseded.add(previous.id);
+  }
+
+  return new Set(confirmed.filter((record) => !superseded.has(record.id)).map((record) => record.id));
+}
+
+function supersessionChainHasCycle(startId, byId) {
+  const seen = new Set();
+  let currentId = startId;
+  while (currentId && byId.has(currentId)) {
+    if (seen.has(currentId)) return true;
+    seen.add(currentId);
+    const current = byId.get(currentId);
+    if (current.source !== SUBSCRIPTION_SOURCE.RECURRING) return false;
+    const previousId = current.supersedesRecordId;
+    if (!previousId) return false;
+    if (previousId === currentId) return true;
+    const previous = byId.get(previousId);
+    if (!previous) return false;
+    if (previous.source !== SUBSCRIPTION_SOURCE.RECURRING) return false;
+    if (current.sourcePatternId !== previous.sourcePatternId) return false;
+    currentId = previousId;
+  }
+  return false;
 }
 
 function recurringClassification(confidence) {
