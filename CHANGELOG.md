@@ -2,6 +2,48 @@
 
 This file records the user-facing and release-relevant changes prepared for OneStep Money. Publication and shipped status remain authoritative in the GitHub release/project records.
 
+## 2.3.0 — Subscriptions
+
+### Feature
+- Added a local subscription model that consumes the existing recurring-payment evidence, supports explicit confirm/reject decisions, and allows manual subscription add/edit without introducing a second recurrence engine (#128).
+- Added a first-class Subscriptions surface with authoritative normalised monthly/annual costs, filtering, sorting, user ranking and explicit Keep, Essential and Excluded protection states (#129).
+- Added provider cancellation guidance that can route to verified direct, help or generic official destinations; Apple-managed subscriptions use the generic Apple subscriptions route, and opening guidance never marks a subscription cancelled (#130).
+- Added a local monthly savings target and deterministic lowest-personal-value recommendation that preserves variable cost ranges, reports approximate bottom-X% coverage and remaining gap, and remains advice only (#131).
+- Added explicit subscription lifecycle states and integrated unresolved subscription work into the existing Review Inbox and Next Move systems without creating a second task or priority queue (#132).
+
+### UI/UX
+- Added keyboard-accessible ranking alternatives, labelled subscription controls, explicit lifecycle controls and non-colour uncertainty/status wording.
+- Added clear recurring cost ranges, cancellation/contract review state and savings-target explanation while retaining the existing Light, Night and Follow System presentation foundations.
+- Kept cancellation navigation separate from lifecycle state so an external page open cannot imply successful cancellation.
+
+### QOL
+- Added local user-owned subscription CSV export with spreadsheet-formula hardening.
+- Added conservative savings suggestions that start with the user's lowest-value eligible subscriptions while respecting Keep, Essential, Excluded, contract and lifecycle decisions.
+
+### Security
+- Subscription management remains local-first and offline-capable except when the user explicitly opens an official provider cancellation/help page.
+- Added no telemetry, analytics, cloud financial storage, remote subscription-management service, provider credential storage or account scraping.
+- No v2.3.0 subscription workflow automatically cancels a service, moves money, borrows money or changes a provider account.
+- Subscription names, amounts, transaction descriptions, account details, credentials and financial content are not added to logs.
+
+### Maintenance
+- Integrated #128 through #132 into one release candidate and expanded fictional regression coverage across recurring detection, ranking, cancellation routing, savings recommendations, lifecycle, Review/Next Move, forecasting, recovery, backup/restore and export.
+- Restored the explicit GitHub Pages module allowlist closure required by the subscription Review integration.
+- Updated application package and lockfile metadata for v2.3.0 (#133).
+
+### Data/Migration
+- Subscription records, savings preferences and lifecycle workflow metadata are additive inert local envelopes inside the existing transactional state container; v2.3.0 does not require a top-level schema bump or historical transaction rewrite.
+- Existing state revision, recovery, encrypted restart and backup/restore protections remain authoritative; malformed optional subscription metadata fails conservatively rather than preventing recovery of core financial state.
+- Planned or in-progress cancellation does not optimistically remove a recurring commitment from financial forecasts before effective evidence warrants it.
+- All release verification data is fictional/anonymised.
+
+### Known Limitations
+- Provider cancellation destinations and successful provider-side completion cannot be verified automatically by OneStep Money.
+- Cancellation planned/in-progress remains in conservative forecasts until the underlying recurring evidence actually stops or an authoritative effective boundary is available.
+- Recommendations are advice only and never execute cancellation or money movement.
+- Automatic provider login, cancellation scraping and remote subscription intelligence are not part of v2.3.0.
+- Automated Electron/package checks complement but do not replace an interactive human walkthrough of the final Windows build.
+
 ## 2.2.4 — Windows Pointer and Fullscreen Rendering
 
 ### Bug
