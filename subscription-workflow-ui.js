@@ -39,12 +39,7 @@ async function augmentWorkflowControls() {
   if (loaded?.status !== 'normal') return;
   latestState = loaded.state;
 
-  const heading = view.querySelector('.view-heading');
-  if (heading && !view.querySelector('[data-subscription-export]')) {
-    const exportButton = button('Export subscription data', 'secondary-button');
-    exportButton.dataset.subscriptionExport = 'true';
-    heading.append(exportButton);
-  }
+  ensureSubscriptionExportControl(view);
 
   const records = new Map(listSubscriptionRecords(latestState).map((record) => [record.id, record]));
   for (const card of view.querySelectorAll('[data-subscription-id]')) {
@@ -54,6 +49,23 @@ async function augmentWorkflowControls() {
     if (!record || !details) continue;
     details.append(workflowPanel(record));
   }
+}
+
+export function ensureSubscriptionExportControl(view, createControl = createExportControl) {
+  if (!view?.querySelector) return null;
+  const existing = view.querySelector('[data-subscription-export]');
+  if (existing) return existing;
+  const heading = view.querySelector('.subscriptions-heading');
+  if (!heading) return null;
+  const exportButton = createControl();
+  if (!exportButton) return null;
+  exportButton.dataset.subscriptionExport = 'true';
+  heading.append(exportButton);
+  return exportButton;
+}
+
+function createExportControl() {
+  return button('Export subscription data', 'secondary-button');
 }
 
 function workflowPanel(record) {
@@ -141,9 +153,18 @@ async function handleSubmit(event) {
 async function handleClick(event) {
   const exportButton = event.target.closest('[data-subscription-export]');
   if (!exportButton || !window.financeAPI?.exportCsv || !latestState) return;
+  try {
+    await runSubscriptionExport(exportButton, latestState, window.financeAPI.exportCsv);
+  } catch {
+    // Export cancellation/failure is non-destructive; the control is re-enabled by the runner.
+  }
+}
+
+export async function runSubscriptionExport(exportButton, state, exportCsv) {
+  if (!exportButton || !state || typeof exportCsv !== 'function') return null;
   exportButton.disabled = true;
   try {
-    await window.financeAPI.exportCsv(exportSubscriptionsCsv(latestState));
+    return await exportCsv(exportSubscriptionsCsv(state));
   } finally {
     exportButton.disabled = false;
   }
