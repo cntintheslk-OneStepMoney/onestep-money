@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, URLSearchParams } from 'node:url';
 
 const canonicalFields = ['Project', 'Priority', 'Complexity', 'Title', 'Status', 'Type', 'Target Release', 'Area', 'Branch', 'Start Date', 'Target Date'];
 const lifecycle = ['Idea', 'Backlog', 'Planned', 'In Progress', 'Review', 'Done'];
@@ -90,6 +90,40 @@ export function planUpdates(metadata, fields, current = {}) {
   return updates;
 }
 
+function paginatedPath(path, page, perPage) {
+  const [pathname, query = ''] = path.split('?');
+  const params = new URLSearchParams(query);
+  params.set('per_page', String(perPage));
+  params.set('page', String(page));
+  return `${pathname}?${params.toString()}`;
+}
+
+export async function paginateRest(client, path, options = {}) {
+  const perPage = options.perPage ?? 100;
+  const maxPages = options.maxPages ?? 1000;
+  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 100) throw new Error('pagination perPage must be an integer from 1 to 100');
+  if (!Number.isInteger(maxPages) || maxPages < 1) throw new Error('pagination maxPages must be a positive integer');
+
+  const items = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const batch = await client.rest(paginatedPath(path, page, perPage));
+    if (!Array.isArray(batch)) throw new Error(`GitHub pagination expected an array for ${path}`);
+    items.push(...batch);
+    if (batch.length < perPage) return items;
+  }
+  throw new Error(`GitHub pagination exceeded ${maxPages} pages for ${path}`);
+}
+
+export async function listRepositoryIssues(client, issueNumber = 0) {
+  if (issueNumber) return [await client.rest(`/issues/${issueNumber}`)];
+  const items = await paginateRest(client, '/issues?state=all');
+  return items.filter(item => !item.pull_request);
+}
+
+export function listRepositoryBranches(client) {
+  return paginateRest(client, '/branches');
+}
+
 class GitHub {
   constructor(token, repository) { this.token = token; [this.owner, this.repo] = repository.split('/'); }
   async request(url, options = {}) {
@@ -125,12 +159,13 @@ async function applyUpdate(client, projectId, itemId, update) {
   await client.graphql(mutation, { project: projectId, item: itemId, field: update.fieldId, value });
 }
 
-async function syncIssue(client, context, adapter, issue, dryRun) {
-  const branches = await client.rest('/branches?per_page=100');
+async function syncIssue(client, context, adapter, issue, dryRun, getBranches) {
   const planned = extract(issue.body, 'Planned branch');
   const pulls = planned ? await client.rest(`/pulls?state=all&per_page=100&head=${encodeURIComponent(`${client.owner}:${planned}`)}`) : [];
   const pr = pulls[0];
-  const branch = planned && (pr || branches.some(entry => entry.name === planned)) ? planned : undefined;
+  let branch;
+  if (planned && pr) branch = planned;
+  else if (planned && (await getBranches()).some(entry => entry.name === planned)) branch = planned;
   const startDate = pr?.created_at?.slice(0, 10) ?? (branch ? issue.created_at?.slice(0, 10) : undefined);
   const metadata = validateIssueMetadata(deriveIssueMetadata(issue, { project: adapter.project.displayName, branch, startDate, reviewReady: Boolean(pr?.draft === false && !pr?.merged_at), merged: Boolean(pr?.merged_at) }), adapter.areas);
   const updates = planUpdates(metadata, context.fields);
@@ -138,6 +173,12 @@ async function syncIssue(client, context, adapter, issue, dryRun) {
   const itemId = await ensureItem(client, context.id, issue.node_id);
   for (const update of updates) await applyUpdate(client, context.id, itemId, update);
   return { issue: issue.number, metadata, updates: updates.map(update => update.name) };
+}
+
+export async function syncIssues(client, context, adapter, issues, getBranches, dryRun = false) {
+  const results = [];
+  for (const issue of issues) results.push(await syncIssue(client, context, adapter, issue, dryRun, getBranches));
+  return results;
 }
 
 async function main() {
@@ -150,9 +191,10 @@ async function main() {
   const errors = validateProjectSchema(context.fields, adapter.areas);
   if (errors.length) throw new Error(errors.join('; '));
   const issueNumber = Number(process.env.DEVOPS_ISSUE_NUMBER || 0);
-  const issues = issueNumber ? [await client.rest(`/issues/${issueNumber}`)] : (await client.rest('/issues?state=all&per_page=100')).filter(item => !item.pull_request);
-  const results = [];
-  for (const issue of issues) results.push(await syncIssue(client, context, adapter, issue, process.argv.includes('--dry-run')));
+  const issues = await listRepositoryIssues(client, issueNumber);
+  let branchesPromise;
+  const getBranches = () => branchesPromise ??= listRepositoryBranches(client);
+  const results = await syncIssues(client, context, adapter, issues, getBranches, process.argv.includes('--dry-run'));
   console.log(JSON.stringify(results, null, 2));
 }
 
