@@ -1,3 +1,5 @@
+import './subscriptions-ui.js';
+
 export const THEMES = Object.freeze(['system', 'light', 'dark']);
 export const DASHBOARD_MODES = Object.freeze(['simple', 'detailed']);
 
