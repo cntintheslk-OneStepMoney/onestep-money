@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, URLSearchParams } from 'node:url';
 
 const canonicalFields = ['Project', 'Priority', 'Complexity', 'Title', 'Status', 'Type', 'Target Release', 'Area', 'Branch', 'Start Date', 'Target Date'];
 const lifecycle = ['Idea', 'Backlog', 'Planned', 'In Progress', 'Review', 'Done'];
