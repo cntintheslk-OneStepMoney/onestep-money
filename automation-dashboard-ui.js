@@ -1,13 +1,12 @@
 import { buildAutomationDashboardModel, setAutomationEnabledState } from './automation-dashboard.js';
 import { setAutomationRuleEnabled } from './automation-rule-model.js';
-import { renderRecurringActivityPanel } from './recurring-finance-ui.js';
+import { markRecurringActivityReturnToAutomation, renderRecurringActivityPanel } from './recurring-finance-ui.js';
 import { automationViewMarkup, renderAutomationModel, renderAutomationRecovery } from './automation-dashboard-render.js';
 
 let state = null;
 let started = false;
 let refreshing = false;
 let queued = false;
-const RETURN_KEY = 'onestep.automation.return';
 
 function boot() {
   const shell = document.getElementById('appShell');
@@ -31,9 +30,6 @@ function start() {
   ensureSurface();
   document.addEventListener('click', onClick, true);
   document.addEventListener('change', onChange, true);
-  const restore = window.sessionStorage.getItem(RETURN_KEY) === '1';
-  window.sessionStorage.removeItem(RETURN_KEY);
-  if (restore) activate(false);
   refresh();
 }
 
@@ -174,8 +170,8 @@ async function saveGlobal(enabled, control) {
     if (['blocked', 'conflict'].includes(saved?.status)) {
       throw new Error(saved.message || 'Automation state could not be saved safely.');
     }
-    window.sessionStorage.setItem(RETURN_KEY, '1');
-    window.location.reload();
+    state = saved;
+    await refresh(enabled ? 'Automation resumed.' : 'Automation paused.');
   } catch (error) {
     control.disabled = false;
     await refresh(error?.message || 'Automation state could not be changed safely.');
@@ -192,8 +188,8 @@ async function pauseRule(id, button) {
     if (['blocked', 'conflict'].includes(saved?.status)) {
       throw new Error(saved.message || 'That rule could not be saved safely.');
     }
-    window.sessionStorage.setItem(RETURN_KEY, '1');
-    window.location.reload();
+    state = saved;
+    await refresh('Rule paused. Existing financial history was left unchanged.');
   } catch (error) {
     button.disabled = false;
     await refresh(error?.message || 'That rule could not be changed safely.');
@@ -214,6 +210,7 @@ async function routeTo(route) {
     return;
   }
   if (route === 'recurring') {
+    markRecurringActivityReturnToAutomation();
     document.querySelector('.nav-button[data-view="transactions"]')?.click();
     if (state) renderRecurringActivityPanel(state);
     queueMicrotask(() => focusElement(document.getElementById('recurringActivityPanel')));
