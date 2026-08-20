@@ -2,6 +2,34 @@
 
 This file records the user-facing and release-relevant changes prepared for OneStep Money. Publication and shipped status remain authoritative in the GitHub release/project records.
 
+## 2.3.1 — Immediate Correctness and Governance Repair
+
+### Bug
+- Prevented materially changed recurring subscription evidence from leaving both historical and replacement records active in current counts, totals, ranking or savings recommendations (#168).
+- Corrected Money In so trusted external incoming transactions remain primary evidence while a valid unmatched dated payslip can supply missing salary income without double counting a matching bank credit (#30).
+- Restored the subscription CSV export control to the real Subscriptions header and kept it available after ordinary rerenders without duplicate controls (#169).
+- Corrected Project Sync parsing for the canonical numbered metadata format used by current Roadmap and Work Issues (#173).
+- Paginated full Project Sync Issue and branch reconciliation so scheduled/manual reconciliation no longer silently stops at the first REST page (#174).
+
+### QOL
+- Subscription CSV export remains explicitly user initiated, local-only and resilient to save-dialog cancellation or failure.
+- Existing subscription history remains preserved while current calculations use only the authoritative current confirmed generation for valid supersession chains.
+
+### Maintenance
+- Added focused regression coverage for subscription supersession chains, Money In reconciliation, subscription export rerenders, numbered Project metadata and Project Sync pagination.
+- Preserved existing Policy CI, Security Gate, privacy, quality, Electron, Pages and Windows packaging verification boundaries.
+- Updated application package and lockfile metadata for v2.3.1 (#183).
+
+### Data/Migration
+- No stored financial-data schema migration or historical financial-record rewrite is required.
+- Subscription supersession and Money In corrections are derived at read/report time; existing transactions, payslips and subscription history remain intact.
+- Project Sync changes affect repository governance metadata only and do not alter application financial state.
+
+### Known Limitations
+- Malformed or cyclic subscription supersession metadata remains conservatively visible rather than silently discarding ambiguous confirmed records.
+- Payslips without a valid pay date are not inferred into Money In because cross-month assignment would be unsafe.
+- Export remains a local CSV flow; this patch adds no cloud upload, sharing or remote financial storage.
+
 ## 2.3.0 — Subscriptions
 
 ### Feature
