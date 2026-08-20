@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { FinanceDataStore } from '../data-store.js';
 import {
   SUBSCRIPTION_PROTECTION,
   createManualSubscription,
@@ -13,6 +17,8 @@ import {
   buildSubscriptionsPresentation,
   filterAndSortSubscriptionRows
 } from '../subscriptions-presentation.js';
+
+const seedPath = new URL('../seed-data.json', import.meta.url);
 
 test('subscription presentation uses authoritative normalised costs and preserves variable ranges', () => {
   let state = baseState();
@@ -37,6 +43,38 @@ test('ranking and protection are authoritative persisted subscription state and 
   assert.equal(records.find((record) => record.id === one.id).rank, 2);
   assert.equal(records.find((record) => record.id === one.id).protectionState, SUBSCRIPTION_PROTECTION.ESSENTIAL);
   assert.equal(records.find((record) => record.id === two.id).protectionState, SUBSCRIPTION_PROTECTION.NONE);
+});
+
+test('rank, protection and notes survive restart and encrypted portable backup restore', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'onestep-subscription-ranking-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const store = new FinanceDataStore(directory, seedPath, null, { secureStorage: secureStorage() });
+  await store.initialise();
+  let state = (await store.loadState()).state;
+  state = createManualSubscription(state, { providerName: 'Fictional Ranked Service', amount: 11, cadence: 'monthly', notes: 'Fictional note' }, at(0));
+  const id = listSubscriptionRecords(state)[0].id;
+  state = updateSubscriptionRanking(state, [id], at(1));
+  state = setSubscriptionProtection(state, id, SUBSCRIPTION_PROTECTION.KEEP, at(2));
+  state = await store.saveState(state);
+
+  const restarted = new FinanceDataStore(directory, seedPath, null, { secureStorage: secureStorage() });
+  await restarted.initialise();
+  state = (await restarted.loadState()).state;
+  let record = listSubscriptionRecords(state).find((item) => item.id === id);
+  assert.equal(record.rank, 1);
+  assert.equal(record.protectionState, SUBSCRIPTION_PROTECTION.KEEP);
+  assert.equal(record.notes, 'Fictional note');
+
+  const backupPath = path.join(directory, 'fictional-ranking.osmb');
+  await restarted.createPortableBackup(backupPath, 'fictional-passphrase', state);
+  state = updateSubscriptionRanking(state, [], at(3));
+  state = setSubscriptionProtection(state, id, SUBSCRIPTION_PROTECTION.NONE, at(4));
+  await restarted.saveState(state);
+  const restored = await restarted.restorePortableBackup(backupPath, 'fictional-passphrase');
+  record = listSubscriptionRecords(restored.state).find((item) => item.id === id);
+  assert.equal(record.rank, 1);
+  assert.equal(record.protectionState, SUBSCRIPTION_PROTECTION.KEEP);
+  assert.equal(record.notes, 'Fictional note');
 });
 
 test('legacy rankingExcluded records migrate to explicit excluded protection', () => {
@@ -74,3 +112,10 @@ function baseState() {
   };
 }
 function at(offset) { return new Date(Date.UTC(2026, 7, 20, 8, offset, 0)); }
+function secureStorage() {
+  return {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(value, 'utf8'),
+    decryptString: (value) => value.toString('utf8')
+  };
+}
