@@ -1,4 +1,5 @@
 import './subscriptions-ui.js';
+import './subscription-cancellation-ui.js';
 
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
