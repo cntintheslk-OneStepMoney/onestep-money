@@ -4,6 +4,7 @@ import {
   AUTOMATION_REVIEW_TYPE, automationReviewPresentation, automationReviewRoute,
   automationReviewSourceActive, automationReviewSources
 } from './automation-review-integration.js';
+import { deriveSubscriptionCandidates } from './subscription-model.js';
 import {
   SUBSCRIPTION_REVIEW_TYPE, subscriptionReviewPresentation, subscriptionReviewRoute,
   subscriptionReviewSourceActive, subscriptionReviewSources
@@ -31,10 +32,18 @@ export function synchroniseReviewItems(state, now = new Date()) {
   state.reviewItems = (Array.isArray(state.reviewItems) ? state.reviewItems : [])
     .filter((item) => !supplementalReviewType(item?.type));
   base.synchroniseReviewItems(state, now);
+
+  const subscriptionSources = subscriptionReviewSources(state, now);
+  const subscriptionPatternIds = new Set(deriveSubscriptionCandidates(state).map((candidate) => String(candidate.sourcePatternId || '')).filter(Boolean));
+  const automationSources = automationReviewSources(state, now).filter((source) => !(
+    source.type === AUTOMATION_REVIEW_TYPE.RECURRING_CONFIRMATION
+    && source.sourceType === 'recurring_pattern'
+    && subscriptionPatternIds.has(String(source.sourceId))
+  ));
   mergeSupplementalItems(state, previousSupplemental, [
     ...missingIncomeReviewSources(state, now),
-    ...automationReviewSources(state, now),
-    ...subscriptionReviewSources(state, now)
+    ...automationSources,
+    ...subscriptionSources
   ], now);
   return state;
 }
