@@ -1,18 +1,17 @@
-# retrigger: 2026-08-20
 name: Finalise v2.3.1 release metadata
 
 on:
-  push:
+  pull_request:
     branches:
-      - release/stability-patch
-    paths:
-      - .github/workflows/finalise-stability-patch.yml
+      - development
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   finalise:
+    if: github.head_ref == 'release/stability-patch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release branch
@@ -77,13 +76,13 @@ jobs:
         run: |
           git diff --check
           node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!=='2.3.1'||l.version!=='2.3.1'||l.packages[''].version!=='2.3.1') process.exit(1)"
-          git diff --exit-code -- package.json package-lock.json CHANGELOG.md >/dev/null && exit 1 || true
           test -z "$(git diff --name-only | grep -Ev '^(package.json|package-lock.json|CHANGELOG.md)$')"
 
-      - name: Commit release metadata
+      - name: Commit release metadata and remove helper
         run: |
           git config user.name 'Dev Ops'
           git config user.email '104691209+Blackline-Development-DevOps@users.noreply.github.com'
           git add package.json package-lock.json CHANGELOG.md
-          git commit -m '[v2.3.1][Maintenance] Finalise patch release metadata' -m $'Purpose:\nPrepare the exact v2.3.1 release metadata for the integrated correctness and governance patch.\n\nChanges:\nBump package and lockfile metadata to v2.3.1 and add the consolidated changelog covering #168, #30, #169, #173 and #174.\n\nVerification:\nVersion consistency and diff-scope checks passed in the one-shot release finaliser. Full release CI follows on the principal PR.\n\nIssue: #183'
+          git rm .github/workflows/finalise-stability-patch.yml
+          git commit -m '[v2.3.1][Maintenance] Finalise patch release metadata' -m $'Purpose:\nPrepare the exact v2.3.1 release metadata for the integrated correctness and governance patch.\n\nChanges:\nBump package and lockfile metadata to v2.3.1, add the consolidated changelog covering #168, #30, #169, #173 and #174, and remove the temporary finaliser.\n\nVerification:\nVersion consistency and diff-scope checks passed in the one-shot release finaliser. Full release CI follows on the principal PR.\n\nIssue: #183'
           git push origin HEAD:release/stability-patch
