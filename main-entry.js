@@ -3,6 +3,7 @@ import { runStoredAutomationRulesWithHistory } from './automation-history-runner
 import { previewStoredAutomationRules } from './automation-rules.js';
 import './interaction-smoke-main.js';
 import './native-interaction-smoke-main.js';
+import './subscription-cancellation-main.js';
 import './main-process.js';
 
 const MAX_AUTOMATION_STATE_BYTES = 25_000_000;

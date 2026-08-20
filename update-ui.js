@@ -1,3 +1,8 @@
+import './subscriptions-ui.js';
+import './subscription-cancellation-ui.js';
+import './subscription-savings-ui.js';
+import './subscription-workflow-ui.js';
+
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export function createUpdateUiState() {
