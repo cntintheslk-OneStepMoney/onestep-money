@@ -6,6 +6,7 @@ import { resolveTransactionBudgetAssignment } from './transaction-categorisation
 export const SCHEMA_VERSION = 9;
 export const ALL_TIME_PERIOD = 'all';
 export const INCOME_PAYMENT_CATEGORY = 'Income';
+const PAYSLIP_RECONCILIATION_WINDOW_DAYS = 3;
 
 export function formatCurrency(value, options = {}) {
   return new Intl.NumberFormat('en-GB', {
@@ -47,13 +48,76 @@ export function periodTransactions(transactions, month) {
     && isTransactionFinanciallyActive(transaction));
 }
 
+export function calculatePeriodIncome(state, month = state.settings?.selectedMonth) {
+  const transactionEvidence = periodTransactions(state.transactions, month)
+    .filter(isExternalCashflowTransaction)
+    .map((transaction, index) => ({
+      transaction,
+      key: `${String(transaction.id || 'transaction')}@${index}`,
+      sourceId: String(transaction.id || `transaction-${index + 1}`),
+      date: financialDateKey(transaction.date),
+      period: reportingMonth(transaction.budgetMonth) || reportingMonth(transaction.date),
+      amountPennies: Math.max(0, moneyToPennies(transaction.incoming))
+    }))
+    .filter((entry) => entry.amountPennies > 0);
+  const entries = transactionEvidence.map((entry) => ({
+    sourceType: 'transaction', sourceId: entry.sourceId, date: entry.date,
+    amount: penniesToMoney(entry.amountPennies)
+  }));
+  const availableTransactionKeys = new Set(transactionEvidence
+    .filter((entry) => isPayslipReconciliationTransaction(entry.transaction))
+    .map((entry) => entry.key));
+  let payslipFallbackPennies = 0;
+  const payslipEvidence = periodPayslips(state.payslips, month)
+    .map((payslip, index) => ({
+      payslip,
+      sourceId: String(payslip.id || `payslip-${index + 1}`),
+      payDate: financialDateKey(payslip.payDate),
+      period: reportingMonth(payslip.period) || reportingMonth(payslip.payDate),
+      amountPennies: Math.max(0, moneyToPennies(payslip.netPay))
+    }))
+    .filter((entry) => entry.payDate && entry.amountPennies > 0)
+    .sort((left, right) => left.payDate.localeCompare(right.payDate) || left.sourceId.localeCompare(right.sourceId));
+
+  for (const payslip of payslipEvidence) {
+    const match = transactionEvidence
+      .filter((entry) => availableTransactionKeys.has(entry.key) && entry.amountPennies === payslip.amountPennies)
+      .filter((entry) => entry.date
+        ? Math.abs(dateDistance(entry.date, payslip.payDate)) <= PAYSLIP_RECONCILIATION_WINDOW_DAYS
+        : Boolean(entry.period && payslip.period && entry.period === payslip.period))
+      .sort((left, right) => {
+        const leftDistance = left.date ? Math.abs(dateDistance(left.date, payslip.payDate)) : Number.POSITIVE_INFINITY;
+        const rightDistance = right.date ? Math.abs(dateDistance(right.date, payslip.payDate)) : Number.POSITIVE_INFINITY;
+        return leftDistance - rightDistance || left.sourceId.localeCompare(right.sourceId);
+      })[0];
+    if (match) {
+      availableTransactionKeys.delete(match.key);
+      continue;
+    }
+    payslipFallbackPennies += payslip.amountPennies;
+    entries.push({
+      sourceType: 'payslip', sourceId: payslip.sourceId, date: payslip.payDate,
+      amount: penniesToMoney(payslip.amountPennies)
+    });
+  }
+
+  const transactionPennies = transactionEvidence.reduce((total, entry) => total + entry.amountPennies, 0);
+  return {
+    total: penniesToMoney(transactionPennies + payslipFallbackPennies),
+    transactionTotal: penniesToMoney(transactionPennies),
+    payslipFallbackTotal: penniesToMoney(payslipFallbackPennies),
+    entries: entries.sort((left, right) => left.date.localeCompare(right.date)
+      || left.sourceType.localeCompare(right.sourceType) || left.sourceId.localeCompare(right.sourceId))
+  };
+}
+
 export function calculatePeriodSummary(state, month = state.settings?.selectedMonth) {
   const monthCount = reportingPeriodMonthCount(state, month);
   const rows = periodTransactions(state.transactions, month);
   const external = rows.filter(isExternalCashflowTransaction);
-  const income = sum(external, 'incoming');
+  const income = calculatePeriodIncome(state, month).total;
   const spending = sum(external, 'outgoing');
-  const payslips = (state.payslips || []).filter((payslip) => month === ALL_TIME_PERIOD || payslip.period === month);
+  const payslips = periodPayslips(state.payslips, month);
   const grossPay = sum(payslips, 'grossPay');
   const payrollDeductions = sum(payslips, 'totalDeductions');
   const netPay = sum(payslips, 'netPay');
@@ -821,6 +885,24 @@ function currentMonth() {
 function reportingMonth(value) {
   const month = String(value || '').slice(0, 7);
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : '';
+}
+
+function periodPayslips(payslips, month) {
+  return (payslips || []).filter((payslip) => month === ALL_TIME_PERIOD
+    || (reportingMonth(payslip.period) || reportingMonth(payslip.payDate)) === month);
+}
+
+function financialDateKey(value) {
+  const text = String(value || '').slice(0, 10);
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(text)) return '';
+  const date = new Date(`${text}T12:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text ? text : '';
+}
+
+function isPayslipReconciliationTransaction(transaction) {
+  const treatment = normaliseBudgetTreatment(transaction.budgetTreatment);
+  return !['refund', 'reversal'].includes(treatment)
+    && !transaction.refundOfTransactionId && !transaction.reversalOfTransactionId;
 }
 
 function exactTransactionKey(item) {
