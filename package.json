@@ -106,6 +106,8 @@
       "subscription-cancellation.js",
       "subscription-cancellation-main.js",
       "subscription-cancellation-ui.js",
+      "subscription-savings.js",
+      "subscription-savings-ui.js",
       "subscriptions-presentation.js",
       "subscriptions-ui.js",
       "subscriptions.css",
