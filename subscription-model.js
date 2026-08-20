@@ -3,6 +3,7 @@ import { deriveRecurringPatterns, RECURRING_CONFIDENCE } from './recurring-finan
 const STORAGE_KIND = 'subscription';
 const MAX_RECORDS = 1000;
 const MAX_TEXT = 200;
+const MAX_NOTES = 1000;
 const CADENCE_FACTORS = Object.freeze({
   weekly: 52,
   fortnightly: 26,
@@ -25,6 +26,7 @@ export const SUBSCRIPTION_DECISION = Object.freeze({
   REJECTED: 'rejected'
 });
 export const SUBSCRIPTION_VISIBILITY = Object.freeze({ ACTIVE: 'active', HIDDEN: 'hidden' });
+export const SUBSCRIPTION_PROTECTION = Object.freeze({ NONE: 'none', KEEP: 'keep', ESSENTIAL: 'essential', EXCLUDED: 'excluded' });
 export const SUBSCRIPTION_CADENCE = Object.freeze(Object.fromEntries(Object.keys(CADENCE_FACTORS).map((value) => [value.toUpperCase().replace(/-/g, '_'), value])));
 
 export function listSubscriptionRecords(state = {}) {
@@ -102,6 +104,7 @@ export function createManualSubscription(state, input = {}, now = new Date()) {
   const existing = listSubscriptionRecords(state);
   const id = safeRecordId(input.id) || `subscription_manual_${shortHash(`${providerName}|${input.accountId || ''}|${timestamp}|${existing.length}`)}`;
   if (existing.some((record) => record.id === id)) throw new Error('That subscription identifier is already in use.');
+  const protectionState = normaliseProtectionState(input.protectionState, input.rankingExcluded);
   const record = normaliseSubscriptionRecord({
     id,
     source: SUBSCRIPTION_SOURCE.MANUAL,
@@ -113,7 +116,10 @@ export function createManualSubscription(state, input = {}, now = new Date()) {
     cadence,
     amountRange,
     expectedNextPayment: normaliseExpectedPayment(input.expectedNextPayment || input.nextPaymentDate),
-    rankingExcluded: input.rankingExcluded === true,
+    rank: normaliseRank(input.rank),
+    protectionState,
+    rankingExcluded: protectionState === SUBSCRIPTION_PROTECTION.EXCLUDED,
+    notes: safeText(input.notes, MAX_NOTES),
     cancellationMetadataRef: safeReference(input.cancellationMetadataRef),
     sourcePatternId: '',
     sourceEvidenceFingerprint: '',
@@ -140,6 +146,9 @@ export function editSubscription(state, subscriptionId, patch = {}, now = new Da
   if (!providerName) throw new TypeError('A subscription needs a provider or service name.');
   if (!cadence) throw new TypeError('Choose a supported subscription billing cadence.');
   if (!amountRange) throw new TypeError('Enter a valid non-negative subscription amount or amount range.');
+  const protectionState = patch.protectionState === undefined && patch.rankingExcluded === undefined
+    ? existing.protectionState
+    : normaliseProtectionState(patch.protectionState, patch.rankingExcluded);
 
   const updated = normaliseSubscriptionRecord({
     ...existing,
@@ -150,12 +159,44 @@ export function editSubscription(state, subscriptionId, patch = {}, now = new Da
     expectedNextPayment: patch.expectedNextPayment === undefined && patch.nextPaymentDate === undefined
       ? existing.expectedNextPayment
       : normaliseExpectedPayment(patch.expectedNextPayment ?? patch.nextPaymentDate),
-    rankingExcluded: patch.rankingExcluded === undefined ? existing.rankingExcluded : patch.rankingExcluded === true,
+    rank: patch.rank === undefined ? existing.rank : normaliseRank(patch.rank),
+    protectionState,
+    rankingExcluded: protectionState === SUBSCRIPTION_PROTECTION.EXCLUDED,
+    notes: patch.notes === undefined ? existing.notes : safeText(patch.notes, MAX_NOTES),
     cancellationMetadataRef: patch.cancellationMetadataRef === undefined
       ? existing.cancellationMetadataRef : safeReference(patch.cancellationMetadataRef),
     updatedAt: timestamp
   });
   return persistRecord(state, updated);
+}
+
+export function setSubscriptionProtection(state, subscriptionId, protectionState, now = new Date()) {
+  const safe = normaliseProtectionState(protectionState, false);
+  if (safe !== protectionState) throw new TypeError('Choose a supported subscription protection state.');
+  return editSubscription(state, subscriptionId, { protectionState: safe }, now);
+}
+
+export function updateSubscriptionRanking(state, orderedSubscriptionIds = [], now = new Date()) {
+  if (!Array.isArray(orderedSubscriptionIds)) throw new TypeError('Subscription ranking must be an ordered list.');
+  const active = activeSubscriptionRecords(state);
+  const allowed = new Set(active.map((record) => record.id));
+  const ordered = [];
+  const seen = new Set();
+  for (const rawId of orderedSubscriptionIds) {
+    const id = safeRecordId(rawId);
+    if (!id || !allowed.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    ordered.push(id);
+  }
+  const ranking = new Map(ordered.map((id, index) => [id, index + 1]));
+  const timestamp = isoTimestamp(now);
+  let next = state;
+  for (const record of active) {
+    const rank = ranking.get(record.id) || null;
+    if (record.rank === rank) continue;
+    next = persistRecord(next, { ...record, rank, updatedAt: timestamp });
+  }
+  return next;
 }
 
 export function setSubscriptionHidden(state, subscriptionId, hidden = true, now = new Date()) {
@@ -202,6 +243,7 @@ function decideSubscriptionCandidate(state, candidateId, decision, now) {
     ? listSubscriptionRecords(state).find((record) => record.id === candidate.recordId)
     : null;
   const id = existing?.id || `subscription_recurring_${shortHash(`${candidate.sourcePatternId}|${candidate.sourceEvidenceFingerprint}`)}`;
+  const protectionState = existing?.protectionState || SUBSCRIPTION_PROTECTION.NONE;
   const record = normaliseSubscriptionRecord({
     ...(existing || {}),
     id,
@@ -214,7 +256,10 @@ function decideSubscriptionCandidate(state, candidateId, decision, now) {
     cadence: existing?.cadence || candidate.cadence,
     amountRange: existing?.amountRange || candidate.amountRange,
     expectedNextPayment: existing?.expectedNextPayment || candidate.expectedNextPayment,
-    rankingExcluded: existing?.rankingExcluded === true,
+    rank: existing?.rank || null,
+    protectionState,
+    rankingExcluded: protectionState === SUBSCRIPTION_PROTECTION.EXCLUDED,
+    notes: existing?.notes || '',
     cancellationMetadataRef: existing?.cancellationMetadataRef || null,
     sourcePatternId: candidate.sourcePatternId,
     sourceEvidenceFingerprint: candidate.sourceEvidenceFingerprint,
@@ -308,6 +353,7 @@ function normaliseSubscriptionRecord(value) {
     ? SUBSCRIPTION_DECISION.CONFIRMED
     : Object.values(SUBSCRIPTION_DECISION).includes(value.decisionState) ? value.decisionState : SUBSCRIPTION_DECISION.UNCONFIRMED;
   const visibility = Object.values(SUBSCRIPTION_VISIBILITY).includes(value.visibility) ? value.visibility : SUBSCRIPTION_VISIBILITY.ACTIVE;
+  const protectionState = normaliseProtectionState(value.protectionState, value.rankingExcluded);
   return {
     id,
     source,
@@ -319,7 +365,10 @@ function normaliseSubscriptionRecord(value) {
     cadence,
     amountRange,
     expectedNextPayment: normaliseExpectedPayment(value.expectedNextPayment),
-    rankingExcluded: value.rankingExcluded === true,
+    rank: normaliseRank(value.rank),
+    protectionState,
+    rankingExcluded: protectionState === SUBSCRIPTION_PROTECTION.EXCLUDED,
+    notes: safeText(value.notes, MAX_NOTES),
     cancellationMetadataRef: safeReference(value.cancellationMetadataRef),
     sourcePatternId,
     sourceEvidenceFingerprint,
@@ -409,6 +458,17 @@ function safeReference(value) {
 
 function safeText(value, max = MAX_TEXT) {
   return String(value || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function normaliseRank(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const rank = Number(value);
+  return Number.isInteger(rank) && rank > 0 && rank <= MAX_RECORDS ? rank : null;
+}
+
+function normaliseProtectionState(value, legacyExcluded = false) {
+  if (Object.values(SUBSCRIPTION_PROTECTION).includes(value)) return value;
+  return legacyExcluded === true ? SUBSCRIPTION_PROTECTION.EXCLUDED : SUBSCRIPTION_PROTECTION.NONE;
 }
 
 function finiteNonNegative(value) {
