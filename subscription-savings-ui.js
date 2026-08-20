@@ -4,6 +4,7 @@ import {
   readSubscriptionSavingsTarget,
   setSubscriptionSavingsTarget
 } from './subscription-savings.js';
+import { subscriptionRecommendationOptions } from './subscription-workflow.js';
 
 let latestState = null;
 let refreshQueued = false;
@@ -42,7 +43,7 @@ async function renderSavingsPanel() {
 
 function buildPanel(state) {
   const target = readSubscriptionSavingsTarget(state);
-  const recommendation = buildSubscriptionSavingsRecommendation(state);
+  const recommendation = buildSubscriptionSavingsRecommendation(state, subscriptionRecommendationOptions(state));
   const section = el('section', 'subscriptions-section');
   section.dataset.subscriptionSavingsPanel = 'true';
 
@@ -50,7 +51,7 @@ function buildPanel(state) {
   append(
     heading,
     el('h2', '', 'Monthly savings target'),
-    el('p', 'muted', 'OneStep starts with your lowest-value eligible subscriptions and uses the conservative minimum monthly saving. Keep, Essential and Excluded choices stay authoritative.')
+    el('p', 'muted', 'OneStep starts with your lowest-value eligible subscriptions and uses the conservative minimum monthly saving. Keep, Essential, Excluded and lifecycle review choices stay authoritative.')
   );
   section.append(heading);
 
@@ -88,7 +89,7 @@ function recommendationView(recommendation) {
     return card;
   }
   if (recommendation.status === SUBSCRIPTION_SAVINGS_STATUS.NO_ELIGIBLE) {
-    append(card, el('strong', '', 'No safe ranked subscriptions are eligible'), el('p', 'muted', 'OneStep will not substitute protected, unranked, uncertain or otherwise excluded subscriptions just to hit the target.'));
+    append(card, el('strong', '', 'No safe ranked subscriptions are eligible'), el('p', 'muted', 'OneStep will not substitute protected, unranked, uncertain, lifecycle-blocked or contract-review subscriptions just to hit the target.'));
     return card;
   }
 
@@ -135,7 +136,7 @@ async function handleSubmit(event) {
       statusMessage = saved.message || 'Your data changed elsewhere. The newest state is shown; review it and try again.';
     } else {
       latestState = saved;
-      statusMessage = 'Monthly savings target saved. Recommendation recalculated from current subscription data.';
+      statusMessage = 'Monthly savings target saved. Recommendation recalculated from current subscription and lifecycle data.';
     }
   } catch (error) {
     const loaded = await window.financeAPI.loadState().catch(() => null);
