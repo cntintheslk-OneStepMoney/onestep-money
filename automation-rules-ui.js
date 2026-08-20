@@ -332,7 +332,12 @@ async function runCycle() {
     if (result.changed || result.reviewChanged) {
       const saved = await window.financeAPI.saveState(result.state);
       if (saved?.status === 'blocked' || saved?.status === 'conflict') throw new Error(saved.message || 'Automation could not save safely.');
-      state = saved; window.location.reload(); return;
+      state = saved;
+      render();
+      setStatus(runSummary.conflicts
+        ? `${runSummary.conflicts} conflicting rule decision${runSummary.conflicts === 1 ? '' : 's'} need review. No conflicting category was applied.`
+        : `${runSummary.applied} safe local automation change${runSummary.applied === 1 ? '' : 's'} applied.`);
+      return;
     }
     render();
   } catch (error) { setStatus(error?.message || 'Automatic rules were not applied. Existing financial data was left unchanged.'); }
