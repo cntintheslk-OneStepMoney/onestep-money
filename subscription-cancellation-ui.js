@@ -144,7 +144,7 @@ function updateFormVisibility(form) {
 }
 function setStatus(id, text) { const node = document.querySelector(`[data-cancellation-status="${cssEscape(id)}"]`); if (node) node.textContent = text; }
 function provenanceLabel(value) { return value === 'official_apple' ? 'verified Apple generic management route' : value === 'user_verified_official' ? 'official destination you saved' : 'local manual guidance'; }
-function cssEscape(value) { return globalThis.CSS?.escape ? CSS.escape(String(value)) : String(value).replace(/[^A-Za-z0-9_-]/g, ''); }
+function cssEscape(value) { return globalThis.CSS?.escape ? globalThis.CSS.escape(String(value)) : String(value).replace(/[^A-Za-z0-9_-]/g, ''); }
 function field(text, control, className = '') { const label = el('label', className); label.append(document.createTextNode(text), control); return label; }
 function select(name, options, value) { const node = document.createElement('select'); node.name = name; for (const [v, text] of options) { const option = document.createElement('option'); option.value = v; option.textContent = text; option.selected = v === value; node.append(option); } return node; }
 function input(name, value, type) { const node = document.createElement('input'); node.name = name; node.value = value || ''; node.type = type; return node; }
