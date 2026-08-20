@@ -4,6 +4,7 @@ import {
   buildSubscriptionModel,
   normaliseRecurringCost
 } from './subscription-model.js';
+import { buildSubscriptionSavingsRecommendation } from './subscription-savings.js';
 
 export const SUBSCRIPTION_FILTER = Object.freeze({
   ALL: 'all', ACTIVE: 'active', REVIEW: 'review', UNRANKED: 'unranked', PROTECTED: 'protected'
@@ -18,16 +19,18 @@ export function buildSubscriptionsPresentation(state = {}, options = {}) {
   const activeRows = model.active.map((record) => recordRow(record, accounts));
   const candidateRows = model.candidates.map((candidate) => candidateRow(candidate, accounts));
   const rows = filterAndSortSubscriptionRows([...activeRows, ...candidateRows], options);
+  const recommendation = buildSubscriptionSavingsRecommendation(state, options.savingsOptions || {});
   return {
     rows,
     activeRows: filterAndSortSubscriptionRows(activeRows, options),
     candidateRows: filterAndSortSubscriptionRows(candidateRows, options),
+    recommendation,
     summary: {
       activeCount: activeRows.length,
       reviewCount: candidateRows.length,
       monthly: aggregateCost(activeRows.map((row) => row.cost?.monthly).filter(Boolean)),
       annual: aggregateCost(activeRows.map((row) => row.cost?.annual).filter(Boolean)),
-      potentialSavings: null
+      potentialSavings: recommendation.monthlyTarget > 0 ? recommendation.monthly : null
     }
   };
 }
@@ -60,7 +63,7 @@ function recordRow(record, accounts) {
     expectedNextPayment: record.expectedNextPayment,
     classification: record.classification,
     statusLabel: record.classification === SUBSCRIPTION_CLASSIFICATION.MANUAL ? 'Manual' : 'Confirmed by you',
-    lifecycleStatus: 'active',
+    lifecycleStatus: record.lifecycleStatus || 'active',
     rank: Number.isInteger(record.rank) && record.rank > 0 ? record.rank : null,
     protectionState: record.protectionState || SUBSCRIPTION_PROTECTION.NONE,
     notes: record.notes || '',
